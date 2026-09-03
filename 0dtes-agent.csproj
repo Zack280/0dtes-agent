@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>_0dtes_agent</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>0dtes_agent</AssemblyName>
+  </PropertyGroup>
+
+  <!-- Agent code sits at the repo root; the vendored shared app files live under
+       src/Models and src/Services. All are auto-included by the default globbing
+       and keep their _0dtes_app.Models / _0dtes_app.Services namespaces. -->
+
+  <ItemGroup>
+    <None Include="agent.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

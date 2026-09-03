@@ -1,0 +1,12 @@
+## .NET build output
+bin/
+obj/
+
+## Editor
+.vscode/
+.idea/
+*.user
+
+## Local logs / temp
+*.txt
+!agent.json

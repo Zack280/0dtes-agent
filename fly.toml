@@ -1,0 +1,13 @@
+app = "0dtes-agent"
+
+[processes]
+app = "dotnet 0dtes_agent.dll"
+
+[env]
+# Optional: set NTFY_TOPIC here or, better, as a Fly secret:
+#   flyctl secrets set NTFY_TOPIC=your-topic
+# If unset, the agent falls back to agent.json's ntfyTopic.
+
+[[vm]]
+size = "shared-cpu-1x"
+memory = "256mb"

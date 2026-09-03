@@ -1,0 +1,18 @@
+{
+  "ntfyTopic": "0dtes-test-alerts",
+  "symbols": [ "SOFI", "SPY" ],
+  "scanIntervalSeconds": 30,
+  "mode": "yahoo",
+  "paper": true,
+  "tradierToken": "",
+  "enableBrief": true,
+  "briefIntervalMinutes": 0,
+  "newsPerSymbol": 3,
+  "rules": [
+    { "kind": "DeltaSweetSpot", "isEnabled": true },
+    { "kind": "VolumeSurge", "isEnabled": true },
+    { "kind": "IvSpike", "isEnabled": true },
+    { "kind": "PriceLevelCross", "isEnabled": true },
+    { "kind": "ExpiryWindow", "isEnabled": false }
+  ]
+}
