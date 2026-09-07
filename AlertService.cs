@@ -75,6 +75,62 @@ public sealed class AlertService
         }
     }
 
+    /// <summary>
+    /// One-shot scan for scheduled runs (e.g. cron): build sources, scan every
+    /// symbol once, optionally send a brief, then exit. Returns the number of
+    /// signals sent, or -1 if data sources couldn't be reached.
+    /// </summary>
+    public async Task<int> RunOnceAsync(CancellationToken ct = default)
+    {
+        var (chain, quotes) = BuildDataSources();
+
+        try
+        {
+            await quotes.ConnectAsync(_config.Symbols, ct);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[{DateTime.Now:HH:mm:ss}] connect failed: {ex.Message}");
+            return -1;
+        }
+
+        // The quote pump fills _latest asynchronously after ConnectAsync; give it
+        // a moment to produce at least one quote per symbol before scanning.
+        foreach (var symbol in _config.Symbols)
+        {
+            var got = await WaitForQuoteAsync(quotes, symbol, TimeSpan.FromSeconds(20), ct);
+            if (!got)
+            {
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {symbol}: no quote within 20s.");
+                return -1;
+            }
+        }
+
+        var sent = 0;
+        var scannedAny = false;
+        var rules = _config.BuildScanRules();
+        foreach (var symbol in _config.Symbols)
+        {
+            var engine = new ScannerEngine();
+            try
+            {
+                var count = await ScanOnceAsync(chain, quotes, engine, rules, symbol, ct);
+                if (count < 0)
+                {
+                    continue;
+                }
+                scannedAny = true;
+                sent += count;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[{DateTime.Now:HH:mm:ss}] {symbol}: {ex.Message}");
+            }
+        }
+
+        return scannedAny ? sent : -1;
+    }
+
     private (IOptionChainService Chain, IQuoteStream Quotes) BuildDataSources()
     {
         var mode = _config.Mode?.Trim().ToLowerInvariant() ?? "mock";
@@ -106,7 +162,26 @@ public sealed class AlertService
         return (mock, mock);
     }
 
-    private async Task ScanOnceAsync(
+    private static async Task<bool> WaitForQuoteAsync(
+        IQuoteStream quotes,
+        string symbol,
+        TimeSpan timeout,
+        CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (await quotes.GetQuoteAsync(symbol, ct) is not null)
+            {
+                return true;
+            }
+            await Task.Delay(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
+        }
+        return false;
+    }
+
+    private async Task<int> ScanOnceAsync(
         IOptionChainService chain,
         IQuoteStream quotes,
         ScannerEngine engine,
@@ -118,12 +193,18 @@ public sealed class AlertService
         if (spot is null)
         {
             Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {symbol}: no quote yet, skipping.");
-            return;
+            return -1;
         }
 
         var expiries = await chain.GetExpiriesAsync(symbol, ct);
         var expiry = expiries.FirstOrDefault()?.Date ?? DateTime.Today;
         var rows = await chain.GetChainAsync(symbol, expiry, spot.Mid, ct);
+
+        if (rows.Count == 0)
+        {
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {symbol}: empty chain, skipping.");
+            return -1;
+        }
 
         var signals = engine.Evaluate(rules.ToList(), rows, spot, expiry, DateTime.Now, symbol);
         var ctx = await _yahoo.GetSymbolContextAsync(symbol, _config.NewsPerSymbol, ct);
@@ -134,6 +215,7 @@ public sealed class AlertService
 
         Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {symbol} @ {spot.Last:F2} expiry {expiry:yyyy-MM-dd} " +
                           $"rows {rows.Count} new signals {signals.Count}");
+        return signals.Count;
     }
 
     private async Task SendBriefAsync(CancellationToken ct)

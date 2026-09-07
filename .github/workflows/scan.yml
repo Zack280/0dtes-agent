@@ -1,0 +1,32 @@
+name: scan
+
+on:
+  schedule:
+    # Every 5 minutes, Mon-Sun 13:30-21:05 UTC. Covers the full US market
+    # session year-round (EST and EDT); weekends are skipped in the job.
+    - cron: "*/5 13-21 * * *"
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip weekends
+        run: |
+          dow=$(date -u +%u)
+          if [ "$dow" -gt 5 ]; then
+            echo "Weekend ($(date -u +%A)), skipping scan."
+            exit 0
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Scan once
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: dotnet run --project 0dtes-agent.csproj -c Release -- --scan-once

@@ -22,6 +22,14 @@ if (args.Any(a => string.Equals(a, "--brief", StringComparison.OrdinalIgnoreCase
 
 var service = new AlertService(config, notifier);
 
+// One-shot scan (used by scheduled/cron runs): scan every symbol once, exit.
+if (args.Any(a => string.Equals(a, "--scan-once", StringComparison.OrdinalIgnoreCase)))
+{
+    var sent = await service.RunOnceAsync(CancellationToken.None);
+    Console.WriteLine($"Scan complete. Signals sent: {Math.Max(sent, 0)}");
+    return sent >= 0 ? 0 : 1;
+}
+
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
 {
