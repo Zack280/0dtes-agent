@@ -38,6 +38,7 @@
 <header>
   <h1>0DTE Agent</h1>
   <span class="badge closed" id="market">market: ?</span>
+  <span class="badge unknown" id="regime">regime: ?</span>
   <span class="updated" id="updated"></span>
 </header>
 
@@ -104,8 +105,11 @@ const optHit = (l) =>
     : l && l.optionRet15Pct != null ? (l.optionRet15Pct > 0 ? 1 : 0) : null;
 
 async function render() {
-  const [alerts, labels] = await Promise.all([getLines("alerts.jsonl"), getLines("labels.jsonl")]);
+  const [alerts, labels, regimes] = await Promise.all([getLines("alerts.jsonl"), getLines("labels.jsonl"), getLines("regime.jsonl")]);
   const labelMap = new Map(labels.map(l => [l.id, l]));
+
+  const regime = regimes.at(-1);
+  document.getElementById("regime").textContent = regime?.regime ? `regime: ${regime.regime}` : "regime: –";
 
   document.getElementById("market").textContent = marketOpen() ? "market: open" : "market: closed";
   document.getElementById("market").className = "badge " + (marketOpen() ? "open" : "closed");

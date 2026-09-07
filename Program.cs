@@ -31,6 +31,28 @@ if (args.Any(a => string.Equals(a, "--label", StringComparison.OrdinalIgnoreCase
     return 0;
 }
 
+// Seed/persist the market-regime history (vol + trend per trading day).
+if (args.Any(a => string.Equals(a, "--regime", StringComparison.OrdinalIgnoreCase)))
+{
+    var symbol = "SPY";
+    for (var i = 0; i < args.Length - 1; i++)
+    {
+        if (string.Equals(args[i], "--regime-symbol", StringComparison.OrdinalIgnoreCase))
+        {
+            symbol = args[i + 1];
+        }
+    }
+    using var regime = new MarketRegimeService();
+    var store = new RegimeStore(config.DataDir);
+    var days = await regime.BuildDailyHistoryAsync(symbol, CancellationToken.None);
+    store.WriteAll(days);
+    var latest = days.LastOrDefault();
+    Console.WriteLine(latest is null
+        ? "Regime seed: no complete days returned."
+        : $"Regime seed: {days.Count} day(s) written to {store.RegimePath}; last {latest.Date} -> {latest.Regime}");
+    return latest is null ? 1 : 0;
+}
+
 var service = new AlertService(config, notifier);
 
 // One-shot scan (used by scheduled/cron runs): scan every symbol once, exit.

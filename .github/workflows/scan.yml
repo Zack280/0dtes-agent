@@ -7,9 +7,44 @@ on:
     - cron: "*/5 13-21 * * *"
     # Once after the close (21:35 UTC = 4:35pm ET/5:35pm ET), grade the day's alerts.
     - cron: "35 21 * * 1-5"
+    # Refresh the market-regime history before the US session on trading days.
+    - cron: "20 12 * * 1-5"
   workflow_dispatch:
 
 jobs:
+  regime:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Seed regime history
+        run: dotnet run --project 0dtes-agent.csproj -c Release -- --regime
+
+      - name: Persist regime dataset
+        run: |
+          if [ -f data/regime.jsonl ]; then
+            git add data/regime.jsonl
+            if ! git diff --cached --quiet; then
+              git config user.name "0dtes-agent[bot]"
+              git config user.email "0dtes-agent[bot]@users.noreply.github.com"
+              git commit -m "dataset: refresh regime history ($(wc -l < data/regime.jsonl) day(s))"
+              git push
+            else
+              echo "no regime changes to commit"
+            fi
+          else
+            echo "regime seed produced no output"
+          fi
+
   scan:
     runs-on: ubuntu-latest
     permissions:

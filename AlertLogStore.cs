@@ -38,7 +38,11 @@ public sealed record AlertRecord(
     double Score,
     string WindowKind,
     bool Sent,
-    ContractSnapshot? Contract = null);   // the option we'd actually buy
+    ContractSnapshot? Contract = null,   // the option we'd actually buy
+    double? DaysToExpiry = null,          // calendar DTE at signal time
+    int HourOfDay = 0,                    // local market hour (9..16)
+    int DayOfWeek = 0,                    // 1 (Mon) .. 5 (Fri), UTC
+    string? Regime = null);               // market regime at signal time (e.g. "highVol-bull")
 
 public sealed record LabelRecord(
     string Id,

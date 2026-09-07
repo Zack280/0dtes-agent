@@ -11,6 +11,7 @@ public sealed class AlertService
     private readonly YahooReferenceService _yahoo = new();
     private readonly BriefingChannel _briefing;
     private readonly AlertLogStore _log;
+    private readonly string? _regime;
     private DateTime _lastBrief = DateTime.MinValue;
 
     public AlertService(AgentConfig config, NtfyNotifier notifier)
@@ -19,6 +20,7 @@ public sealed class AlertService
         _notifier = notifier;
         _briefing = new BriefingChannel(notifier, _yahoo);
         _log = new AlertLogStore(config.DataDir);
+        _regime = new RegimeStore(config.DataDir).LoadLatest()?.Regime;
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -239,10 +241,16 @@ public sealed class AlertService
     {
         var rec = ctx is not null && RecommendationScorer.TryScore(signal, ctx, spot, out var r) ? r : null;
 
+        var nowUtc = DateTime.UtcNow;
+        var timeEt = UsEastern.ToLocal(nowUtc);
+        var dte = contract is null
+            ? (double?)null
+            : Math.Max(0, (contract.ExpiryUtc.Date - nowUtc.Date).TotalDays);
+
         // Log every candidate signal so we can later grade its outcome.
         _log.AppendAlert(new AlertRecord(
             Guid.NewGuid().ToString("N"),
-            DateTime.UtcNow,
+            nowUtc,
             symbol,
             signal.Strategy,
             OutcomeLabeler.DirectionOf(signal.Strategy),
@@ -253,7 +261,11 @@ public sealed class AlertService
             rec?.Window.Score ?? 0,
             rec?.Window.Kind.ToString() ?? "",
             Sent: rec is not null && rec.Window.Score >= _config.MinAlertScore,
-            Contract: contract));
+            Contract: contract,
+            DaysToExpiry: dte,
+            HourOfDay: timeEt.Hour,
+            DayOfWeek: (int)nowUtc.DayOfWeek,
+            Regime: _regime));
 
         // Quality gate: only alert when the scored recommendation clears the bar.
         if (rec is null || rec.Window.Score < _config.MinAlertScore)
