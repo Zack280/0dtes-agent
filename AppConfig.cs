@@ -29,6 +29,12 @@ public sealed class AgentConfig
 
     public int NewsPerSymbol { get; set; } = 3;
 
+    /// <summary>Directory for the alert/label dataset (for future training).</summary>
+    public string DataDir { get; set; } = "data";
+
+    /// <summary>Only alerts scoring at/above this are sent. Lower = more alerts.</summary>
+    public double MinAlertScore { get; set; } = 50;
+
     public List<RuleConfig> Rules { get; set; } =
     [
         new(ScanRuleKind.DeltaSweetSpot),

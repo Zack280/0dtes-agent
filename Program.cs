@@ -20,11 +20,27 @@ if (args.Any(a => string.Equals(a, "--brief", StringComparison.OrdinalIgnoreCase
     return ok ? 0 : 1;
 }
 
+// Grade past alerts against the underlying's subsequent moves.
+if (args.Any(a => string.Equals(a, "--label", StringComparison.OrdinalIgnoreCase)))
+{
+    using var yahoo = new YahooReferenceService();
+    var store = new AlertLogStore(config.DataDir);
+    var labeler = new OutcomeLabeler(store, yahoo);
+    var n = await labeler.LabelAsync(CancellationToken.None);
+    Console.WriteLine($"Labeled {n} alert(s).");
+    return 0;
+}
+
 var service = new AlertService(config, notifier);
 
 // One-shot scan (used by scheduled/cron runs): scan every symbol once, exit.
 if (args.Any(a => string.Equals(a, "--scan-once", StringComparison.OrdinalIgnoreCase)))
 {
+    if (!MarketHours.IsOpen(DateTime.Now))
+    {
+        Console.WriteLine("US market closed; skipping scan.");
+        return 0;
+    }
     var sent = await service.RunOnceAsync(CancellationToken.None);
     Console.WriteLine($"Scan complete. Signals sent: {Math.Max(sent, 0)}");
     return sent >= 0 ? 0 : 1;

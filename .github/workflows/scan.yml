@@ -2,14 +2,18 @@ name: scan
 
 on:
   schedule:
-    # Every 5 minutes, Mon-Sun 13:30-21:05 UTC. Covers the full US market
+    # Scan every 5 minutes, Mon-Sun 13:30-21:20 UTC. Covers the full US market
     # session year-round (EST and EDT); weekends are skipped in the job.
     - cron: "*/5 13-21 * * *"
+    # Once after the close (21:35 UTC = 4:35pm ET/5:35pm ET), grade the day's alerts.
+    - cron: "35 21 * * 1-5"
   workflow_dispatch:
 
 jobs:
   scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Skip weekends
         run: |
@@ -20,6 +24,8 @@ jobs:
           fi
 
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -30,3 +36,46 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: dotnet run --project 0dtes-agent.csproj -c Release -- --scan-once
+
+      - name: Persist alert dataset
+        run: |
+          git add data/alerts.jsonl
+          if ! git diff --cached --quiet; then
+            git config user.name "0dtes-agent[bot]"
+            git config user.email "0dtes-agent[bot]@users.noreply.github.com"
+            git commit -m "dataset: record $(wc -l < data/alerts.jsonl) alert(s)"
+            git push
+          else
+            echo "no alert changes to commit"
+          fi
+
+  label:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Runs on the weekday only (the labelled cron fires Mon-Fri), or on a manual dispatch.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && endsWith(github.event.schedule, '* 1-5'))
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Label completed alerts
+        run: dotnet run --project 0dtes-agent.csproj -c Release -- --label
+
+      - name: Persist labeled dataset
+        run: |
+          git add data/labels.jsonl
+          if ! git diff --cached --quiet; then
+            git config user.name "0dtes-agent[bot]"
+            git config user.email "0dtes-agent[bot]@users.noreply.github.com"
+            git commit -m "dataset: label $(wc -l < data/labels.jsonl) alert(s)"
+            git push
+          else
+            echo "no label changes to commit"
+          fi

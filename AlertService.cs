@@ -10,6 +10,7 @@ public sealed class AlertService
     private readonly NtfyNotifier _notifier;
     private readonly YahooReferenceService _yahoo = new();
     private readonly BriefingChannel _briefing;
+    private readonly AlertLogStore _log;
     private DateTime _lastBrief = DateTime.MinValue;
 
     public AlertService(AgentConfig config, NtfyNotifier notifier)
@@ -17,6 +18,7 @@ public sealed class AlertService
         _config = config;
         _notifier = notifier;
         _briefing = new BriefingChannel(notifier, _yahoo);
+        _log = new AlertLogStore(config.DataDir);
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -234,10 +236,36 @@ public sealed class AlertService
 
     private async Task NotifyAsync(string symbol, ScanSignal signal, SymbolContext? ctx, QuoteTick spot, CancellationToken ct)
     {
+        var rec = ctx is not null && RecommendationScorer.TryScore(signal, ctx, spot, out var r) ? r : null;
+
+        // Log every candidate signal so we can later grade its outcome.
+        _log.AppendAlert(new AlertRecord(
+            Guid.NewGuid().ToString("N"),
+            DateTime.UtcNow,
+            symbol,
+            signal.Strategy,
+            OutcomeLabeler.DirectionOf(signal.Strategy),
+            spot.Last,
+            ctx?.PreviousDayChangePercent ?? 0,
+            ctx?.PremarketChangePercent ?? 0,
+            ctx?.News.Count ?? 0,
+            rec?.Window.Score ?? 0,
+            rec?.Window.Kind.ToString() ?? "",
+            Sent: rec is not null && rec.Window.Score >= _config.MinAlertScore));
+
+        // Quality gate: only alert when the scored recommendation clears the bar.
+        if (rec is null || rec.Window.Score < _config.MinAlertScore)
+        {
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] skip '0DTE · {symbol} · {signal.Strategy}' " +
+                              $"(score {(rec?.Window.Score ?? 0):F0} < {_config.MinAlertScore})");
+            return;
+        }
+
         var title = $"0DTE · {symbol} · {signal.Strategy}";
         var body =
             $"{signal.Strategy} on {symbol}:\n" +
             $"{signal.Reason}\n" +
+            $"{rec.Window.Label} · Score {rec.Window.Score:F0}/100\n" +
             $"Price ${signal.Price:F2} · {signal.Time:HH:mm:ss}";
 
         var tags = signal.Strategy switch
@@ -255,13 +283,10 @@ public sealed class AlertService
             Console.WriteLine("  (ntfy topic not configured — set NTFY_TOPIC or agent.json NtfyTopic)");
         }
 
-        if (ctx is not null && RecommendationScorer.TryScore(signal, ctx, spot, out var rec))
+        var sent = await _briefing.SendRecommendationAsync(rec, ct);
+        if (sent)
         {
-            var sent = await _briefing.SendRecommendationAsync(rec, ct);
-            if (sent)
-            {
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] rec sent: {rec.Window.Label} ({rec.Window.Score:F0})");
-            }
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] rec sent: {rec.Window.Label} ({rec.Window.Score:F0})");
         }
     }
 }

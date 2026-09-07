@@ -8,6 +8,8 @@
   "enableBrief": true,
   "briefIntervalMinutes": 0,
   "newsPerSymbol": 3,
+  "dataDir": "data",
+  "minAlertScore": 55,
   "rules": [
     { "kind": "DeltaSweetSpot", "isEnabled": true },
     { "kind": "VolumeSurge", "isEnabled": true },

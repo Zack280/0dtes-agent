@@ -17,6 +17,9 @@ public sealed class YahooReferenceService : IDisposable
     private const string SearchUrlTemplate =
         "https://query1.finance.yahoo.com/v1/finance/search?q={0}&quotesCount=0&newsCount={1}&listsCount=0";
 
+    private const string HistoryUrlTemplate =
+        "https://query1.finance.yahoo.com/v8/finance/chart/{0}?interval=1m&period1={1}&period2={2}";
+
     private readonly HttpClient _http;
 
     public YahooReferenceService()
@@ -105,6 +108,54 @@ public sealed class YahooReferenceService : IDisposable
         catch
         {
             return Array.Empty<NewsItem>();
+        }
+    }
+
+    /// <summary>
+    /// Returns the underlying close price closest to (and at/after) the given UTC time
+    /// using 1-minute history. Used to grade whether an alert's direction played out.
+    /// Returns null if no quote is available on/after that time (e.g. market closed).
+    /// </summary>
+    public async Task<double?> GetPriceAtOrAfterAsync(
+        string symbol,
+        DateTime utcTime,
+        TimeSpan windowMinutes,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var start = new DateTimeOffset(utcTime.ToUniversalTime());
+            var end = start.Add(windowMinutes + TimeSpan.FromMinutes(5));
+            var url = string.Format(
+                CultureInfo.InvariantCulture,
+                HistoryUrlTemplate,
+                Uri.EscapeDataString(symbol),
+                start.ToUnixTimeSeconds(),
+                end.ToUnixTimeSeconds());
+            var json = await _http.GetStringAsync(url, ct).ConfigureAwait(false);
+            var response = System.Text.Json.JsonSerializer.Deserialize(
+                json, YahooRefJsonContext.Default.YahooChartResponse);
+            var result = response?.chart?.result?.FirstOrDefault();
+            var ts = result?.timestamp;
+            var closes = result?.indicators?.quote?.FirstOrDefault()?.close;
+            if (ts is null || closes is null || ts.Count == 0)
+            {
+                return null;
+            }
+
+            var target = new DateTimeOffset(utcTime.ToUniversalTime()).ToUnixTimeSeconds();
+            for (var i = 0; i < ts.Count; i++)
+            {
+                if (ts[i] >= target && closes[i] is { } c && double.IsFinite(c))
+                {
+                    return c;
+                }
+            }
+            return null;
+        }
+        catch
+        {
+            return null;
         }
     }
 
