@@ -72,8 +72,8 @@ jobs:
       - name: Label completed alerts
         run: dotnet run --project 0dtes-agent.csproj -c Release -- --label
 
-- name: Persist labeled dataset
-          run: |
+      - name: Persist labeled dataset
+        run: |
             if [ -f data/labels.jsonl ]; then
               git add data/labels.jsonl
               if ! git diff --cached --quiet; then
