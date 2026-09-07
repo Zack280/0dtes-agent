@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>0DTE Agent — Overview</title>
+<style>
+  :root {
+    --ink: #1a2434;
+    --muted: #5b6b81;
+    --line: #d7dee9;
+    --brand: #0d4f8b;
+    --brand2: #0b3a66;
+    --accent: #e8eef7;
+    --code: #f3f6fb;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: "Segoe UI", "Segoe UI Variable Text", Arial, sans-serif;
+    color: var(--ink);
+    margin: 0; padding: 0;
+    font-size: 10.5pt; line-height: 1.5;
+  }
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  @page :first { margin-top: 0; }
+
+  header.cover {
+    color: #fff;
+    background: linear-gradient(135deg, #0d4f8b 0%, #0b3a66 70%, #0a2f52 100%);
+    padding: 34px 28px 26px;
+    margin: 0 0 20px;
+    border-radius: 0 0 10px 10px;
+  }
+  header.cover h1 { margin: 0; font-size: 24pt; font-weight: 600; letter-spacing: .2px; }
+  header.cover .sub { margin: 6px 0 0; font-size: 11pt; opacity: .9; }
+  header.cover .tag { display:inline-block; margin-top:14px; font-size:8.5pt; font-weight:600;
+    letter-spacing: 1px; text-transform: uppercase; background: rgba(255,255,255,.14);
+    border: 1px solid rgba(255,255,255,.3); padding: 4px 10px; border-radius: 999px; }
+
+  h2 {
+    font-size: 14pt; color: var(--brand); margin: 26px 0 8px;
+    padding-bottom: 5px; border-bottom: 1.5px solid var(--line);
+  }
+  h3 { font-size: 11.5pt; margin: 16px 0 4px; color: var(--brand2); }
+  p { margin: 6px 0; }
+  ul, ol { margin: 6px 0 8px; padding-left: 20px; }
+  li { margin: 3px 0; }
+  code {
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 8.8pt; background: var(--code);
+    border: 1px solid var(--line); border-radius: 4px; padding: 0 4px;
+  }
+  pre {
+    font-family: "Cascadia Code", Consolas, monospace;
+    background: var(--code); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font-size: 8.8pt; line-height: 1.45; overflow: hidden;
+    white-space: pre-wrap;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 10px; font-size: 9.2pt; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--accent); color: var(--brand2); font-weight: 600; }
+  tr:nth-child(even) td { background: #fafbfe; }
+  .badge { display: inline-block; font-size: 7.8pt; font-weight: 600; letter-spacing: .4px;
+    border-radius: 999px; padding: 1px 8px; margin-left: 6px; vertical-align: 2px; }
+  .b-green  { background: #e2f3e8; color: #1c6b3b; border: 1px solid #b9e0c8; }
+  .b-blue   { background: #e4edf9; color: #1d4f8a; border: 1px solid #c3d6ef; }
+  .b-amber  { background: #fdf0dd; color: #8a5b12; border: 1px solid #f0d9ad; }
+  .note {
+    background: #fdf8ec; border: 1px solid #efdcaa; border-left: 4px solid #d9a741;
+    border-radius: 6px; padding: 8px 12px; margin: 10px 0; font-size: 9.3pt;
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+  footer { margin-top: 26px; padding-top: 8px; border-top: 1px solid var(--line);
+    font-size: 8.2pt; color: var(--muted); }
+  .avoid-break { page-break-inside: avoid; break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<header class="cover">
+  <h1>0DTE Agent</h1>
+  <div class="sub">Automated 0DTE options scanner, scorer, notifier and self-improving dataset engine</div>
+  <span class="tag">.NET 9 &middot; GitHub Actions &middot; Yahoo Finance &middot; GitHub Pages</span>
+</header>
+
+<!-- ============ 1. Overview ============ -->
+<h2>1. Overview</h2>
+<p>
+  The <strong>0DTE Agent</strong> is an automated intraday scanner and alerting system for
+  same-day-expiry (0DTE) options. During US market hours it continuously watches a small
+  watchlist, looks for option-chain signals across five detection rules, scores each candidate
+  setup on a 0&ndash;100 scale, and pushes a notification when a setup clears the quality bar. It
+  also logs a rich, labeled dataset for every candidate &mdash; market context, the exact option it
+  would trade, its live greeks and price snapshot, and the outcome the setup produced minutes later.
+</p>
+<p>
+  The agent is designed to be <em>verifiable, transparent, and self-improving</em>:
+</p>
+<ul>
+  <li><strong>Watches</strong> the market and the option chain in real time, with an optional long-running loop or a one-shot mode for cron scheduling.</li>
+  <li><strong>Searches</strong> for setups across five distinct signal types.</li>
+  <li><strong>Scores</strong> each signal by combining market context, news, and an intraday "buy window" evaluation.</li>
+  <li><strong>Notifies</strong> via <a href="https://ntfy.sh">ntfy.sh</a> push messages (phone push, free, no single-vendor lock-in).</li>
+  <li><strong>Records</strong> every signal &mdash; sent or skipped &mdash; with market features and a tradeable contract snapshot.</li>
+  <li><strong>Grades</strong> its own alerts after the fact, estimating option P&amp;L so its performance can be audited publicly.</li>
+  <li><strong>Serves</strong> a live status dashboard on GitHub Pages built purely from the recorded dataset.</li>
+</ul>
+
+<!-- ============ 2. How it works ============ -->
+<h2>2. How it works</h2>
+<h3>2.1 Market-aware scanning</h3>
+<p>
+  The agent only operates during the NYSE regular session (Mon&ndash;Fri, 09:30&ndash;16:00 US Eastern)
+  and is holiday-aware for 2025&ndash;2030 (<code>MarketHours.cs</code>). Scheduled runs outside these
+  hours exit cleanly instead of burning compute.
+</p>
+<h3>2.2 Data sources</h3>
+<p>The data layer is pluggable via the <code>mode</code> config:</p>
+<table>
+  <tr><th>Mode</th><th>What it provides</th><th>Typical use</th></tr>
+  <tr><td><code>mock</code></td><td>Synthetic quotes &amp; option chain</td><td>Offline development &amp; tests</td></tr>
+  <tr><td><code>yahoo</code></td><td>Real market data via Yahoo Finance free endpoints: intraday quotes, option chains with bids/asks and greeks, IV, news, previous-day and premarket context</td><td>Default production feed (no API key)</td></tr>
+  <tr><td><code>tradier</code></td><td>Tradier Brokerage API (paper or live)</td><td>Broker-backed market data &amp; execution</td></tr>
+</table>
+<p>
+  The Yahoo feed supplies a <em>reference service</em> (<code>YahooReferenceService</code>) that builds a
+  per-symbol context at scan time: previous-day change %, premarket change %, and the latest headlines.
+  This context feeds the scorer.
+</p>
+<h3>2.3 The scan pipeline</h3>
+<pre>Quote ticks + option chain (per symbol)
+        |-->
+  ScannerEngine.evaluate(rules)
+        |--> candidate ScanSignals (up to 3 per rule, de-duplicated)
+  YahooReferenceService.GetSymbolContext()  --&gt; news, premarket, prev-day
+        |--> RecommendationScorer.TryScore()  --&gt; 0-100 score + BuyWindow
+  AlertLogStore.AppendAlert()  --&gt; every candidate is logged, sent or not
+        |--> score &gt;= minAlertScore ? NtfyNotifier.Send() : skip
+        |--> BuyWindow actionable ? SendRecommendation() : skip</pre>
+
+<!-- ============ 3. Signal rules ============ -->
+<h2>3. Signal rules (scan strategies)</h2>
+<p>
+  The <code>ScannerEngine</code> evaluates up to five rules per scan. Each rule can emit at most
+  <strong>3 signals per scan</strong>, and each specific (rule, strike, side) pair is only flagged once,
+  so the chain is not spammed with repeats of the same setup.
+</p>
+<table>
+  <tr><th>Rule</th><th>Signal type produced</th><th>Trigger</th><th>Direction</th></tr>
+  <tr><td>Delta sweet spot</td><td>Bull call / Bear put</td><td>&mdash; &mdash; quote delta in the |&Delta;| 0.20&ndash;0.50 range</td><td>Long/bearish directional</td></tr>
+  <tr><td>Volume surge</td><td>Volume surge</td><td>Contract volume more than 2&times; the chain median</td><td>Neutral (momentum)</td></tr>
+  <tr><td>IV spike</td><td>IV spike</td><td>Contract IV above 1.5&times; the ATM IV of the same expiry</td><td>Neutral (volatility)</td></tr>
+  <tr><td>Price level cross</td><td>Level cross</td><td>Underlying breaks a round price level between scans</td><td>Neutral (breakout)</td></tr>
+  <tr><td>Expiry window</td><td>Expiry window</td><td>Within 2 hours of expiry (default <em>off</em>)</td><td>Neutral (theta)</td></tr>
+</table>
+<p>
+  Each quote-based signal carries its <strong>strike, side, and full option quote</strong> (bid, ask,
+  delta, gamma, theta, vega, IV), which is what makes option-level outcome labeling possible.
+</p>
+
+<!-- ============ 4. Scoring & windows ============ -->
+<h2>4. Scoring &amp; buy windows</h2>
+<p>
+  Every candidate signal is scored 0&ndash;100 by <code>RecommendationScorer</code>. The score starts at
+  40 and is adjusted by market context:
+</p>
+<table>
+  <tr><th>Input</th><th>Contribution</th></tr>
+  <tr><td>Premarket change</td><td>&plusmn;3% range &times; 5 points</td></tr>
+  <tr><td>Previous-day change</td><td>&plusmn;3% range &times; 2 points</td></tr>
+  <tr><td>Recent news</td><td>+5 points if any headlines</td></tr>
+  <tr><td>Buy-window evaluation</td><td>window score &times; 0.25&nbsp;points</td></tr>
+</table>
+<p>
+  <code>BuyWindowEvaluator</code> picks an intraday context from premarket momentum, prior-day trend,
+  news presence, and time until close:
+</p>
+<table>
+  <tr><th>Window</th><th>Meaning</th><th>Score</th></tr>
+  <tr><td>Open-range momentum</td><td>Premarket move aligns with a directional or volume signal</td><td>80</td></tr>
+  <tr><td>Level breakout</td><td>Round price level crossed with momentum</td><td>85</td></tr>
+  <tr><td>Post-news setup</td><td>News present, watching for a measured move / fade</td><td>55</td></tr>
+  <tr><td>Pre-close decay</td><td>Late in expiry &mdash; fast theta / near-the-money focus</td><td>50</td></tr>
+  <tr><td>Trend pullback</td><td>Direction intact; buy pullbacks toward prior close</td><td>60</td></tr>
+  <tr><td>No window / flat premarket / market closed</td><td>No edge; avoid forced entry</td><td>15 / 0</td></tr>
+</table>
+<p>
+  An alert is only <em>sent</em> when its final score meets the configured
+  <code>minAlertScore</code> (default <code>55</code>). Lower setups are still <strong>logged</strong> to the
+  dataset so the threshold can later be learned rather than hand-tuned.
+</p>
+
+<!-- ============ 5. Notifications ============ -->
+<h2>5. Notifications</h2>
+<p>
+  <code>NtfyNotifier</code> posts to a free ntfy.sh topic (or a self-hosted ntfy server) under TLS.
+  A subscription on the phone via the ntfy app receives each alert as a push notification with title,
+  tags, and priority. Supporting fields: optional Bearer token auth for private/self-hosted topics,
+  and ASCII-sanitised headers to keep requests valid.
+</p>
+<p>The default notify message looks like:</p>
+<pre>0DTE &middot; SPY &middot; Bull call
+&Delta; 0.42 &middot; 770 strike &middot; IV 34%
+Open-range momentum &middot; Score 78/100
+Price $6.40 &middot; 10:32:05</pre>
+<p>When the buy window is actionable, a separate recommendation message also includes the suggested
+  contract symbol.</p>
+
+<!-- ============ 6. The dataset layer ============ -->
+<h2>6. Self-improving dataset layer</h2>
+<p>
+  This is the heart of the product. Every scan produces three JSONL (JSON-lines) datasets under the
+  configured <code>dataDir</code>:
+</p>
+<table>
+  <tr><th>File</th><th>Contents</th><th>Written by</th></tr>
+  <tr><td><code>alerts.jsonl</code></td><td>One line per candidate signal, including skips</td><td><code>AlertLogStore.AppendAlert</code></td></tr>
+  <tr><td><code>labels.jsonl</code></td><td>Outcome grade per alert after it has played out</td><td><code>OutcomeLabeler.LabelAsync</code> (<code>--label</code>)</td></tr>
+  <tr><td><code>regime.jsonl</code></td><td>Daily market regime buckets (vol &times; trend)</td><td><code>--regime</code> seed job</td></tr>
+</table>
+
+<h3>6.1 Captured features per alert</h3>
+<p>Each alert records a fixed, versioned feature set &mdash; this is the schema that later machine
+  learning will train on:</p>
+<table>
+  <tr><th>Group</th><th>Fields</th></tr>
+  <tr><td>Identity</td><td>id, signalTimeUtc, symbol, strategy, direction (+1/&minus;1/0)</td></tr>
+  <tr><td>Market context</td><td>entry spot (underlying), prev-day change %, premarket change %, news count</td></tr>
+  <tr><td>Scoring</td><td>score (0&ndash;100), window kind, <code>sent</code> (passed threshold or not)</td></tr>
+  <tr><td>Temporal</td><td>days to expiry, hour of day (ET), day of week, regime bucket</td></tr>
+  <tr><td>Contract snapshot</td><td>strike, side, expiry, bid/ask/mid, delta, gamma, theta, vega, implied volatility</td></tr>
+</table>
+<h3>6.2 Outcome labeling (option P&amp;L)</h3>
+<p>
+  <code>OutcomeLabeler</code> grades each alert after at least 75 minutes have passed. For the +15 and
+  +60 minute horizons it fetches the underlying's actual intraday path, then reconstructs the trade:
+</p>
+<ul>
+  <li><strong>Entry:</strong> buy the recorded contract at the recorded <em>ask</em>.</li>
+  <li><strong>Exit:</strong> sell at the projected bid at the horizon, computed by <em>greeks replay</em> &mdash; &Delta;&middot;&Delta;S + &frac12;&Gamma;&middot;&Delta;S&sup2; + &Theta;&middot;&Delta;t &mdash; minus the recorded half-spread. IV is held flat.</li>
+  <li><strong>Labels recorded:</strong> underlying <code>dirHit15/60</code> (direction only, for the directional strategies) <em>and</em> projected option return <code>optionRet15/60Pct</code>.</li>
+</ul>
+<div class="note">
+  The option P&amp;L is an estimate from the live contract snapshot (real recorded bids/asks and greeks)
+  replayed against the real underlying path. It is conservative (buy ask / sell bid) but is not a real
+  broker fill; live/paper execution is the eventual validation step.
+</div>
+
+<!-- ============ 7. Operation modes ============ -->
+<h2>7. Operation modes</h2>
+<table>
+  <tr><th>Command</th><th>Behaviour</th></tr>
+  <tr><td><code>dotnet run</code></td><td>Long-running loop: scan every <code>scanIntervalSeconds</code>, send briefs on a schedule, until Ctrl+C.</td></tr>
+  <tr><td><code>--scan-once</code></td><td>One full scan pass then exit. Used by the GitHub Actions cron.</td></tr>
+  <tr><td><code>--brief</code></td><td>Send an on-demand market-context brief (prev-day, premarket, news) and exit.</td></tr>
+  <tr><td><code>--label</code></td><td>Grade all unlabeled alerts older than the labeling window and exit.</td></tr>
+  <tr><td><code>--regime [--regime-symbol SPY]</code></td><td>Fetch daily history and rewrite the market-regime history file, then exit.</td></tr>
+  <tr><td><code>--config &lt;path&gt;</code></td><td>Load a non-default agent.json.</td></tr>
+</table>
+<p>Environment variables override config: <code>NTFY_TOPIC</code> and <code>TRADIER_TOKEN</code>.</p>
+
+<!-- ============ 8. Configuration ============ -->
+<h2>8. Configuration reference (<code>agent.json</code>)</h2>
+<pre>{
+  "ntfyTopic": "0dtes-test-alerts",        // ntfy topic for push notifications
+  "symbols": [ "SOFI", "SPY" ],            // watchlist (0DTE expiries)
+  "scanIntervalSeconds": 30,               // long-running loop cadence
+  "mode": "yahoo",                         // mock | yahoo | tradier
+  "paper": true,                           // broker paper mode (tradier)
+  "tradierToken": "",                      // or TRADIER_TOKEN env var
+  "enableBrief": true,
+  "briefIntervalMinutes": 0,
+  "newsPerSymbol": 3,                      // headlines fetched per symbol
+  "dataDir": "data",                       // JSONL datasets location
+  "minAlertScore": 55,                     // quality gate for sending
+  "rules": [                               // per-rule enable/disable
+    { "kind": "DeltaSweetSpot", "isEnabled": true  },
+    { "kind": "VolumeSurge",    "isEnabled": true  },
+    { "kind": "IvSpike",        "isEnabled": true  },
+    { "kind": "PriceLevelCross","isEnabled": true  },
+    { "kind": "ExpiryWindow",   "isEnabled": false }
+  ]
+}</pre>
+
+<!-- ============ 9. Automation ============ -->
+<h2>9. Automation with GitHub Actions</h2>
+<p>
+  The <code>.github/workflows/scan.yml</code> workflow runs the agent in the cloud on a schedule and
+  version-controls the datasets:
+</p>
+<table>
+  <tr><th>Job</th><th>Schedule (UTC)</th><th>Action</th></tr>
+  <tr><td><code>regime</code></td><td>12:20 Mon&ndash;Fri</td><td>Refresh + commit <code>data/regime.jsonl</code> before the session</td></tr>
+  <tr><td><code>scan</code></td><td>every 5 min, 13:30&ndash;21:20, Mon&ndash;Sun (weekends skipped in-job)</td><td>Run <code>--scan-once</code>, commit <code>data/alerts.jsonl</code> when changed</td></tr>
+  <tr><td><code>label</code></td><td>21:35 Mon&ndash;Fri (after-close)</td><td>Run <code>--label</code>, commit <code>data/labels.jsonl</code> when changed</td></tr>
+  <tr><td>manual</td><td>via <code>workflow_dispatch</code></td><td>Trigger any run by hand</td></tr>
+</table>
+<p>
+  The scan job sets <code>NTFY_TOPIC</code> from a workflow secret, so notification config stays out of the
+  repository. The 13:30&ndash;21:20 UTC window covers the entire US session in both EST and EDT.
+</p>
+
+<!-- ============ 10. Dashboard ============ -->
+<h2>10. Live dashboard (GitHub Pages)</h2>
+<p>
+  The repository ships a static dashboard (<code>docs/index.html</code>) deployed on GitHub Pages. It
+  needs no server &mdash; it reads the same JSONL datasets directly from the repo. It shows:
+</p>
+<ul>
+  <li><strong>Status badges:</strong> market open/closed (computed in-browser for ET) and current regime bucket.</li>
+  <li><strong>Summary cards:</strong> alerts logged, sent, labeled, <em>directional hit%</em>, and <em>option hit%</em>.</li>
+  <li><strong>Recent alerts</strong> table (newest 20): time in ET, symbol, strategy, score, sent/skipped, hit/miss.</li>
+  <li><strong>By-strategy breakdown:</strong> alerts, sent, average score, labeled, directional hit%, option hit% per strategy.</li>
+</ul>
+<p>
+  Because every page load recomputes from the raw JSONL, the dashboard doubles as a public, auditable
+  record of the agent's real (including missed) performance.
+</p>
+
+<!-- ============ 11. Deployment & architecture ============ -->
+<h2>11. Deployment &amp; architecture</h2>
+<ul>
+  <li><strong>Runtime:</strong> .NET 9 console application, nullable-enabled, implicit usings.</li>
+  <li><strong>Packaging:</strong> standalone <code>Dockerfile</code> and <code>fly.toml</code> for Fly.io deployment.</li>
+  <li><strong>Code layout:</strong> agent code at the repo root; shared/borrowed models &amp; services
+    (<code>_0dtes_app.*</code> namespaces) vendored under <code>src/Models</code> and <code>src/Services</code>
+    so the agent builds as a single self-contained project.</li>
+  <li><strong>Testing:</strong> the shared scanner components carry unit tests in the source
+    <code>0dtes_app.Tests</code> project.</li>
+</ul>
+
+<!-- ============ 12. Roadmap ============ -->
+<h2>12. Roadmap &amp; intent</h2>
+<ol>
+  <li><strong>Data collection phase (now):</strong> run the agent through full trading weeks to accumulate a labeled dataset with option-level outcomes.</li>
+  <li><strong>Machine learning:</strong> use <code>alerts.jsonl</code> features and <code>labels.jsonl</code> option-P&amp;L targets to learn which setups actually profit &mdash; replacing the hand-tuned score threshold.</li>
+  <li><strong>Validation &amp; productization:</strong> with a defensible, publicly auditable track record, the agent may evolve into a SaaS offering (signal feeds, dataset licensing, or infrastructure).</li>
+</ol>
+
+<!-- ============ 13. Limitations ============ -->
+<h2>13. Honest limitations</h2>
+<ul>
+  <li>Option P&amp;L labels are <strong>projections</strong> (greeks replay with flat IV between horizons), not broker fills.</li>
+  <li>Yahoo market data is free and real-time-ish but <strong>not a broker-grade feed</strong>; fills, spreads and level-2 depth differ.</li>
+  <li>The Tradier sandbox (paper) uses <strong>delayed</strong> data &mdash; not suitable as the live signal feed.</li>
+  <li>Signal quality is currently driven by heuristics; statistical validation requires hundreds of
+    labeled trades, which is exactly why the dataset layer is built in &mdash; and why the first weeks are
+    a data-collection phase, not a go-live one.</li>
+  <li>Nothing here is financial advice; 0DTE options carry a high risk of total loss.</li>
+</ul>
+
+<footer>
+  0DTE Agent &mdash; product overview snapshot. Based on the current codebase
+  (master &middot; <code>github.com/Zack280/0dtes-agent</code>).
+</footer>
+
+</body>
+</html>
