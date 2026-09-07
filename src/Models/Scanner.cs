@@ -16,4 +16,7 @@ public record ScanSignal(
     string Strategy,
     string Reason,
     double Price,
-    DateTime Time);
+    DateTime Time,
+    double? Strike = null,
+    string? Side = null,
+    OptionQuote? Quote = null);

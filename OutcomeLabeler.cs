@@ -60,6 +60,9 @@ public sealed class OutcomeLabeler
             var ret15 = price15 is { } p15 && entry > 0 ? (p15 - entry) / entry * 100 : (double?)null;
             var ret60 = price60 is { } p60 && entry > 0 ? (p60 - entry) / entry * 100 : (double?)null;
 
+            var opt15 = ProjectOptionReturn(alert, price15, Horizon15);
+            var opt60 = ProjectOptionReturn(alert, price60, Horizon60);
+
             var label = new LabelRecord(
                 alert.Id,
                 now,
@@ -69,7 +72,9 @@ public sealed class OutcomeLabeler
                 ret15,
                 ret60,
                 DirHit(direction, ret15),
-                DirHit(direction, ret60));
+                DirHit(direction, ret60),
+                opt15,
+                opt60);
 
             _store.AppendLabel(label);
             existing[alert.Id] = label;
@@ -87,6 +92,37 @@ public sealed class OutcomeLabeler
         }
         // A signal "hit" if price moved in the predicted direction by > 0.05%.
         return direction * r > 0.05;
+    }
+
+    /// <summary>
+    /// Replays the recorded greeks snapshot against the underlying's actual
+    /// path after the signal, returning the option's projected P&amp;L as a
+    /// percent of entry debit. Buy at the recorded ask, sell at the exit
+    /// mid minus the recorded half-spread. IV is held flat between horizons.
+    /// Returns null when no contract snapshot or quote is available.
+    /// </summary>
+    private static double? ProjectOptionReturn(AlertRecord alert, double? underlyingAt, TimeSpan horizon)
+    {
+        var c = alert.Contract;
+        if (c is null ||
+            underlyingAt is not { } spotAt ||
+            c.EntryAsk is not { } ask || ask <= 0 ||
+            c.EntryBid is not { } bid || bid < 0)
+        {
+            return null;
+        }
+
+        var entryMid = c.EntryMid ?? (bid + ask) / 2;
+        var halfSpread = ask > bid ? (ask - bid) / 2 : 0;
+
+        var dS = spotAt - alert.EntrySpot;
+        var dT = horizon.TotalMinutes / 1440.0; // theta is per-day
+        var dPriced = (c.Delta ?? 0) * dS
+                    + 0.5 * (c.Gamma ?? 0) * dS * dS
+                    + (c.Theta ?? 0) * dT;
+
+        var exitBid = entryMid + dPriced - halfSpread;
+        return (exitBid - ask) / ask * 100;
     }
 
     public static int DirectionOf(string strategy)

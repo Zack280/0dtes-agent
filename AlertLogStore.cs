@@ -4,6 +4,24 @@ using System.Text.Json.Serialization;
 namespace _0dtes_agent;
 
 /// <summary>
+/// The specific option contract the agent would trade at signal time, with a
+/// live quote + greeks snapshot so the objective can be option P&L (not just
+/// underlying direction). The tape is reconstructed offline via greeks replay.
+/// </summary>
+public sealed record ContractSnapshot(
+    double? Strike,
+    string? Side,
+    DateTime ExpiryUtc,
+    double? EntryBid,
+    double? EntryAsk,
+    double? EntryMid,
+    double? Delta,
+    double? Gamma,
+    double? Theta,
+    double? Vega,
+    double? ImpliedVolatility);
+
+/// <summary>
 /// One logged alert, with the features we want to learn from.
 /// Underlying price moves a few minutes after the signal become the label.
 /// </summary>
@@ -19,7 +37,8 @@ public sealed record AlertRecord(
     int NewsCount,
     double Score,
     string WindowKind,
-    bool Sent);              // true if it passed the threshold and was pushed
+    bool Sent,
+    ContractSnapshot? Contract = null);   // the option we'd actually buy
 
 public sealed record LabelRecord(
     string Id,
@@ -29,8 +48,10 @@ public sealed record LabelRecord(
     double? Price60,
     double? Return15Pct,
     double? Return60Pct,
-    bool? DirHit15,          // directional signal correct at +15m
-    bool? DirHit60);         // directional signal correct at +60m
+    bool? DirHit15,                   // directional signal correct at +15m
+    bool? DirHit60,                   // directional signal correct at +60m
+    double? OptionRet15Pct,           // projected option P&L at +15m (fill bid/ask)
+    double? OptionRet60Pct);          // projected option P&L at +60m (fill bid/ask)
 
 /// <summary>
 /// Appends alerts and labels to JSONL files under a data directory.

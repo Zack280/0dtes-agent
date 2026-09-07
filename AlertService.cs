@@ -212,7 +212,8 @@ public sealed class AlertService
         var ctx = await _yahoo.GetSymbolContextAsync(symbol, _config.NewsPerSymbol, ct);
         foreach (var signal in signals)
         {
-            await NotifyAsync(symbol, signal, ctx, spot, ct);
+            var contract = ResolveContract(signal, rows, expiry, spot.Mid);
+            await NotifyAsync(symbol, signal, ctx, spot, contract, ct);
         }
 
         Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {symbol} @ {spot.Last:F2} expiry {expiry:yyyy-MM-dd} " +
@@ -234,7 +235,7 @@ public sealed class AlertService
         }
     }
 
-    private async Task NotifyAsync(string symbol, ScanSignal signal, SymbolContext? ctx, QuoteTick spot, CancellationToken ct)
+    private async Task NotifyAsync(string symbol, ScanSignal signal, SymbolContext? ctx, QuoteTick spot, ContractSnapshot? contract, CancellationToken ct)
     {
         var rec = ctx is not null && RecommendationScorer.TryScore(signal, ctx, spot, out var r) ? r : null;
 
@@ -251,7 +252,8 @@ public sealed class AlertService
             ctx?.News.Count ?? 0,
             rec?.Window.Score ?? 0,
             rec?.Window.Kind.ToString() ?? "",
-            Sent: rec is not null && rec.Window.Score >= _config.MinAlertScore));
+            Sent: rec is not null && rec.Window.Score >= _config.MinAlertScore,
+            Contract: contract));
 
         // Quality gate: only alert when the scored recommendation clears the bar.
         if (rec is null || rec.Window.Score < _config.MinAlertScore)
@@ -288,5 +290,70 @@ public sealed class AlertService
         {
             Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] rec sent: {rec.Window.Label} ({rec.Window.Score:F0})");
         }
+    }
+
+    /// <summary>
+    /// Picks the exact option the agent would trade for a signal. Uses the
+    /// scanner's own quote when the rule produced one; otherwise resolves the
+    /// nearest-ATM contract on the signal's side (bull&rarr;call, bear&rarr;put,
+    /// neutral&rarr;call) so every alert is labelable with option P&amp;L.
+    /// </summary>
+    private static ContractSnapshot? ResolveContract(
+        ScanSignal signal,
+        IReadOnlyList<OptionChainRow> rows,
+        DateTime expiry,
+        double spotMid)
+    {
+        var (strike, side, quote) = signal.Quote is not null
+            ? (signal.Strike, signal.Side, signal.Quote)
+            : ResolveDefaultContract(rows, spotMid, OutcomeLabeler.DirectionOf(signal.Strategy));
+        if (quote is null)
+        {
+            return null;
+        }
+        return new ContractSnapshot(
+            strike,
+            side,
+            expiry.ToUniversalTime(),
+            quote.Bid,
+            quote.Ask,
+            quote.Mid,
+            quote.Delta,
+            quote.Gamma,
+            quote.Theta,
+            quote.Vega,
+            quote.ImpliedVolatility);
+    }
+
+    private static (double? Strike, string? Side, OptionQuote? Quote) ResolveDefaultContract(
+        IReadOnlyList<OptionChainRow> rows,
+        double spotMid,
+        int direction)
+    {
+        if (rows.Count == 0)
+        {
+            return (null, null, null);
+        }
+        var atm = rows
+            .OrderBy(r => Math.Abs(r.Strike - spotMid))
+            .FirstOrDefault(r => (direction >= 0 && r.Call is not null) || (direction < 0 && r.Put is not null));
+        atm ??= rows.OrderBy(r => Math.Abs(r.Strike - spotMid)).FirstOrDefault();
+        if (atm is null)
+        {
+            return (null, null, null);
+        }
+        if (direction < 0 && atm.Put is { } put)
+        {
+            return (atm.Strike, "P", put);
+        }
+        if (atm.Call is { } call)
+        {
+            return (atm.Strike, "C", call);
+        }
+        if (atm.Put is { } p)
+        {
+            return (atm.Strike, "P", p);
+        }
+        return (null, null, null);
     }
 }

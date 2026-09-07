@@ -46,6 +46,7 @@
   <div class="card"><div class="label">Sent</div><div class="value" id="cSent">–</div></div>
   <div class="card"><div class="label">Labeled</div><div class="value" id="cLabeled">–</div></div>
   <div class="card"><div class="label">Directional hit%</div><div class="value" id="cHit">–</div></div>
+  <div class="card"><div class="label">Option hit%</div><div class="value" id="cOptHit">–</div></div>
 </div>
 
 <section>
@@ -56,7 +57,7 @@
 <section>
   <h2>By strategy</h2>
   <table>
-    <thead><tr><th>Strategy</th><th>Alerts</th><th>Sent</th><th>Avg score</th><th>Labeled</th><th>Hit%</th></tr></thead>
+    <thead><tr><th>Strategy</th><th>Alerts</th><th>Sent</th><th>Avg score</th><th>Labeled</th><th>Hit%</th><th>Opt hit%</th></tr></thead>
     <tbody id="strategies"></tbody>
   </table>
 </section>
@@ -98,6 +99,10 @@ async function getLines(path) {
 const dirHit = (a, l) =>
   l && l.dirHit15 != null ? (l.dirHit15 || l.dirHit60 ? 1 : 0) : null;
 
+const optHit = (l) =>
+  l && l.optionRet60Pct != null ? (l.optionRet60Pct > 0 ? 1 : 0)
+    : l && l.optionRet15Pct != null ? (l.optionRet15Pct > 0 ? 1 : 0) : null;
+
 async function render() {
   const [alerts, labels] = await Promise.all([getLines("alerts.jsonl"), getLines("labels.jsonl")]);
   const labelMap = new Map(labels.map(l => [l.id, l]));
@@ -113,6 +118,10 @@ async function render() {
   document.getElementById("cSent").textContent = sent;
   document.getElementById("cLabeled").textContent = labeled;
   document.getElementById("cHit").textContent = labeled ? Math.round(hits / labeled * 100) + "%" : "–";
+
+  const optLabeled = alerts.filter(a => optHit(labelMap.get(a.id)) != null).length;
+  const optHits = alerts.filter(a => { const h = optHit(labelMap.get(a.id)); return h != null && h === 1; }).length;
+  document.getElementById("cOptHit").textContent = optLabeled ? Math.round(optHits / optLabeled * 100) + "%" : "–";
 
   // Recent alerts (newest first)
   const recent = alerts.slice(-20).reverse();
@@ -140,23 +149,26 @@ async function render() {
   const by = {};
   for (const a of alerts) {
     const k = a.strategy || "?";
-    (by[k] ??= { n: 0, sent: 0, score: 0, labeled: 0, hits: 0 }).n++;
+    (by[k] ??= { n: 0, sent: 0, score: 0, labeled: 0, hits: 0, optLabeled: 0, optHits: 0 }).n++;
     const b = by[k];
     if (a.sent) b.sent++;
     b.score += a.score;
     const h = dirHit(a, labelMap.get(a.id));
     if (h != null) { b.labeled++; b.hits += h; }
+    const oh = optHit(labelMap.get(a.id));
+    if (oh != null) { b.optLabeled++; b.optHits += oh; }
   }
   const sEl = document.getElementById("strategies");
   if (!Object.keys(by).length) {
-    sEl.innerHTML = '<tr><td colspan="6" class="empty">No data yet.</td></tr>';
+    sEl.innerHTML = '<tr><td colspan="7" class="empty">No data yet.</td></tr>';
   } else {
     let html = "";
     for (const k of Object.keys(by).sort()) {
       const b = by[k];
       const hitPct = b.labeled ? Math.round(b.hits / b.labeled * 100) + "%" : "–";
+      const optPct = b.optLabeled ? Math.round(b.optHits / b.optLabeled * 100) + "%" : "–";
       html += `<tr><td class="hl">${k}</td><td>${b.n}</td><td>${b.sent}</td>
-               <td>${(b.score / b.n).toFixed(0)}</td><td>${b.labeled}</td><td>${hitPct}</td></tr>`;
+               <td>${(b.score / b.n).toFixed(0)}</td><td>${b.labeled}</td><td>${hitPct}</td><td>${optPct}</td></tr>`;
     }
     sEl.innerHTML = html;
   }

@@ -76,7 +76,10 @@ public sealed class ScannerEngine
                 side == "C" ? "Bull call" : "Bear put",
                 $"Δ {quote.Delta:+0.00;-0.00} · {strike:0} strike · IV {quote.ImpliedVolatility:P0}",
                 quote.Mid,
-                now));
+                now,
+                strike,
+                side,
+                quote));
         }
         return result;
     }
@@ -113,7 +116,10 @@ public sealed class ScannerEngine
                 "Volume surge",
                 $"{side} {strike:0} · {quote.Volume:N0} vol · {quote.Volume / median:F1}x median",
                 quote.Mid,
-                now));
+                now,
+                strike,
+                side,
+                quote));
         }
         return result;
     }
@@ -149,7 +155,10 @@ public sealed class ScannerEngine
                 "IV spike",
                 $"{side} {strike:0} · IV {quote.ImpliedVolatility:P0} · {quote.ImpliedVolatility / atmIv:F1}x ATM",
                 quote.Mid,
-                now));
+                now,
+                strike,
+                side,
+                quote));
         }
         return result;
     }
