@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0DTE Agent</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #0f1420; color: #e6e9f0; margin: 0; padding: 24px;
+  }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0; }
+  .badge { font-size: 12px; padding: 3px 10px; border-radius: 999px; }
+  .open    { background: #16351f; color: #6ee7a0; border: 1px solid #1f4a2e; }
+  .closed  { background: #3a1f1f; color: #f2a0a0; border: 1px solid #552727; }
+  .unknown { background: #333; color: #ccc; border: 1px solid #555; }
+  .updated { color: #8b93a7; font-size: 12px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .card { background: #161c2b; border: 1px solid #242d42; border-radius: 10px; padding: 14px; }
+  .card .label { color: #8b93a7; font-size: 12px; }
+  .card .value { font-size: 24px; font-weight: 600; margin-top: 4px; }
+  section { background: #161c2b; border: 1px solid #242d42; border-radius: 10px; padding: 14px; margin-bottom: 20px; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: #c6cde0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #202942; }
+  th { color: #8b93a7; font-weight: 500; }
+  .empty { color: #8b93a7; padding: 10px 0; }
+  .sent { color: #6ee7a0; }
+  .skip { color: #f2a0a0; }
+  .hl { font-weight: 600; }
+  pre { white-space: pre-wrap; color: #8b93a7; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>0DTE Agent</h1>
+  <span class="badge closed" id="market">market: ?</span>
+  <span class="updated" id="updated"></span>
+</header>
+
+<div class="cards">
+  <div class="card"><div class="label">Alerts logged</div><div class="value" id="cAlerts">–</div></div>
+  <div class="card"><div class="label">Sent</div><div class="value" id="cSent">–</div></div>
+  <div class="card"><div class="label">Labeled</div><div class="value" id="cLabeled">–</div></div>
+  <div class="card"><div class="label">Directional hit%</div><div class="value" id="cHit">–</div></div>
+</div>
+
+<section>
+  <h2>Recent alerts</h2>
+  <div id="recent"></div>
+</section>
+
+<section>
+  <h2>By strategy</h2>
+  <table>
+    <thead><tr><th>Strategy</th><th>Alerts</th><th>Sent</th><th>Avg score</th><th>Labeled</th><th>Hit%</th></tr></thead>
+    <tbody id="strategies"></tbody>
+  </table>
+</section>
+
+<script>
+const OWNER = "Zack280", REPO = "0dtes-agent", BRANCH = "master";
+const BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/data`;
+
+function etNow() {
+  // US Eastern, honoring DST rules (2nd Sun Mar -> 1st Sun Nov).
+  const now = new Date();
+  const utc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes());
+  const year = now.getUTCFullYear();
+  const dstStart = nthSunday(year, 3, 2), dstEnd = nthSunday(year, 11, 1);
+  const shift = (utc / 86400000) >= dstStart && (utc / 86400000) < dstEnd ? 4 : 5;
+  return new Date(utc - shift * 3600000);
+}
+function nthSunday(y, m, n) {
+  let d = Date.UTC(y, m - 1, 1);
+  while (new Date(d).getUTCDay() !== 0) d += 86400000;
+  return d / 86400000 + (n - 1) * 7;
+}
+function marketOpen() {
+  const et = etNow();
+  const dow = et.getUTCDay();
+  const mins = et.getUTCHours() * 60 + et.getUTCMinutes();
+  return dow >= 1 && dow <= 5 && mins >= 570 && mins < 960; // 9:30-16:00 ET
+}
+
+async function getLines(path) {
+  try {
+    const r = await fetch(`${BASE}/${path}`);
+    if (!r.ok) return [];
+    const txt = await r.text();
+    return txt.split("\n").filter(l => l.trim()).map(l => JSON.parse(l));
+  } catch { return []; }
+}
+
+const dirHit = (a, l) =>
+  l && l.dirHit15 != null ? (l.dirHit15 || l.dirHit60 ? 1 : 0) : null;
+
+async function render() {
+  const [alerts, labels] = await Promise.all([getLines("alerts.jsonl"), getLines("labels.jsonl")]);
+  const labelMap = new Map(labels.map(l => [l.id, l]));
+
+  document.getElementById("market").textContent = marketOpen() ? "market: open" : "market: closed";
+  document.getElementById("market").className = "badge " + (marketOpen() ? "open" : "closed");
+  document.getElementById("updated").textContent = `data as of ${new Date().toLocaleString()}`;
+
+  const sent = alerts.filter(a => a.sent).length;
+  const labeled = alerts.filter(a => labelMap.has(a.id) && dirHit(a, labelMap.get(a.id)) != null).length;
+  const hits = alerts.filter(a => { const h = dirHit(a, labelMap.get(a.id)); return h != null && h === 1; }).length;
+  document.getElementById("cAlerts").textContent = alerts.length;
+  document.getElementById("cSent").textContent = sent;
+  document.getElementById("cLabeled").textContent = labeled;
+  document.getElementById("cHit").textContent = labeled ? Math.round(hits / labeled * 100) + "%" : "–";
+
+  // Recent alerts (newest first)
+  const recent = alerts.slice(-20).reverse();
+  const rEl = document.getElementById("recent");
+  if (!recent.length) { rEl.innerHTML = '<div class="empty">No alerts yet — the agent logs its first scan during the next market session.</div>'; }
+  else {
+    let html = '<table><thead><tr><th>Time (ET)</th><th>Symbol</th><th>Strategy</th><th>Score</th><th></th><th>Hit</th></tr></thead><tbody>';
+    for (const a of recent) {
+      const t = etNow(), s = new Date(a.signalTimeUtc + "Z");
+      const hit = dirHit(a, labelMap.get(a.id));
+      html += `<tr>
+        <td>${s.toLocaleString()}</td>
+        <td class="hl">${a.symbol}</td>
+        <td>${a.strategy}</td>
+        <td>${Math.round(a.score)}</td>
+        <td class="${a.sent ? 'sent' : 'skip'}">${a.sent ? "sent" : "skipped"}</td>
+        <td>${hit == null ? "–" : hit ? "hit" : "miss"}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    rEl.innerHTML = html;
+  }
+
+  // Strategy breakdown
+  const by = {};
+  for (const a of alerts) {
+    const k = a.strategy || "?";
+    (by[k] ??= { n: 0, sent: 0, score: 0, labeled: 0, hits: 0 }).n++;
+    const b = by[k];
+    if (a.sent) b.sent++;
+    b.score += a.score;
+    const h = dirHit(a, labelMap.get(a.id));
+    if (h != null) { b.labeled++; b.hits += h; }
+  }
+  const sEl = document.getElementById("strategies");
+  if (!Object.keys(by).length) {
+    sEl.innerHTML = '<tr><td colspan="6" class="empty">No data yet.</td></tr>';
+  } else {
+    let html = "";
+    for (const k of Object.keys(by).sort()) {
+      const b = by[k];
+      const hitPct = b.labeled ? Math.round(b.hits / b.labeled * 100) + "%" : "–";
+      html += `<tr><td class="hl">${k}</td><td>${b.n}</td><td>${b.sent}</td>
+               <td>${(b.score / b.n).toFixed(0)}</td><td>${b.labeled}</td><td>${hitPct}</td></tr>`;
+    }
+    sEl.innerHTML = html;
+  }
+}
+
+render();
+</script>
+</body>
+</html>
