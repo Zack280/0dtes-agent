@@ -52,9 +52,7 @@ jobs:
       - name: Run live pre-market window (320 min)
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: dotnet run --project 0dtes-agent.csproj -c Release -- --run-window-minutes 320
-      - name: Persist alert dataset
-        run: bash .github/scripts/persist-alerts.sh
+        run: bash .github/scripts/run-window.sh 320
 
   market1:
     runs-on: ubuntu-latest
@@ -72,9 +70,7 @@ jobs:
       - name: Run live market open window (210 min)
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: dotnet run --project 0dtes-agent.csproj -c Release -- --run-window-minutes 210
-      - name: Persist alert dataset
-        run: bash .github/scripts/persist-alerts.sh
+        run: bash .github/scripts/run-window.sh 210
 
   market2:
     runs-on: ubuntu-latest
@@ -92,9 +88,7 @@ jobs:
       - name: Run live market close window (180 min)
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: dotnet run --project 0dtes-agent.csproj -c Release -- --run-window-minutes 180
-      - name: Persist alert dataset
-        run: bash .github/scripts/persist-alerts.sh
+        run: bash .github/scripts/run-window.sh 180
 
   post:
     runs-on: ubuntu-latest
@@ -112,9 +106,7 @@ jobs:
       - name: Run live post-market window (90 min)
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: dotnet run --project 0dtes-agent.csproj -c Release -- --run-window-minutes 90
-      - name: Persist alert dataset
-        run: bash .github/scripts/persist-alerts.sh
+        run: bash .github/scripts/run-window.sh 90
 
   # ---------------------------------------------------------------------------
   # Daily regime seed and post-close labeling (kept from the previous config).
