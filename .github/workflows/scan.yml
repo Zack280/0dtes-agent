@@ -1,124 +1,156 @@
-name: scan
+﻿name: scan
 
 on:
   schedule:
-    # Scan every 5 minutes, Mon-Sun 13:30-21:20 UTC. Covers the full US market
-    # session year-round (EST and EDT); weekends are skipped in the job.
-    - cron: "*/5 13-21 * * *"
-    # Once after the close (21:35 UTC = 4:35pm ET/5:35pm ET), grade the day's alerts.
-    - cron: "35 21 * * 1-5"
+    # Continuous coverage, weekday-only, chunked so each job stays well under
+    # the 6-hour hosted-runner limit. Each job runs the agent's live 30s scan
+    # loop continuously for its window, then commits the collected data.
+    #
+    #   PRE     08:00 UTC -> 13:20 UTC  (320 min)  US pre-market session
+    #   MARKET1 13:30 UTC -> 17:00 UTC  (210 min)  US open -> mid
+    #   MARKET2 17:00 UTC -> 20:00 UTC  (180 min)  US mid -> close
+    #   POST    20:00 UTC -> 21:30 UTC  (90 min)   US post-market auction
+    - cron: "0 8 * * 1-5"
+    - cron: "30 13 * * 1-5"
+    - cron: "0 17 * * 1-5"
+    - cron: "0 20 * * 1-5"
+    # Once after the close (21:40 UTC = 5:40pm ET), grade the day's alerts.
+    - cron: "40 21 * * 1-5"
     # Refresh the market-regime history before the US session on trading days.
     - cron: "20 12 * * 1-5"
   workflow_dispatch:
+    inputs:
+      chunk:
+        description: "Scan window to run now (pre | market1 | market2 | post | all)"
+        required: false
+        default: "all"
+
+# Only one scan window runs at a time so windows never overlap and every
+# continuous chunk commits cleanly without git push conflicts.
+concurrency:
+  group: scan
+  cancel-in-progress: false
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Continuous scan loops. One job per chunk so each can be gated on its own
+  # cron trigger. All share the same run-and-persist flow.
+  # ---------------------------------------------------------------------------
+  pre:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: (github.event_name == 'schedule' && contains(github.event.schedule, '0 8 * * 1-5')) || (github.event_name == 'workflow_dispatch' && (inputs.chunk == 'all' || inputs.chunk == 'pre'))
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - name: Run live pre-market window (320 min)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: dotnet run --project 0dtes-agent.csproj -c Release -- --run-window-minutes 320
+      - name: Persist alert dataset
+        run: bash .github/scripts/persist-alerts.sh
+
+  market1:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: (github.event_name == 'schedule' && contains(github.event.schedule, '30 13 * * 1-5')) || (github.event_name == 'workflow_dispatch' && (inputs.chunk == 'all' || inputs.chunk == 'market1'))
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - name: Run live market open window (210 min)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: dotnet run --project 0dtes-agent.csproj -c Release -- --run-window-minutes 210
+      - name: Persist alert dataset
+        run: bash .github/scripts/persist-alerts.sh
+
+  market2:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: (github.event_name == 'schedule' && contains(github.event.schedule, '0 17 * * 1-5')) || (github.event_name == 'workflow_dispatch' && (inputs.chunk == 'all' || inputs.chunk == 'market2'))
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - name: Run live market close window (180 min)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: dotnet run --project 0dtes-agent.csproj -c Release -- --run-window-minutes 180
+      - name: Persist alert dataset
+        run: bash .github/scripts/persist-alerts.sh
+
+  post:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: (github.event_name == 'schedule' && contains(github.event.schedule, '0 20 * * 1-5')) || (github.event_name == 'workflow_dispatch' && (inputs.chunk == 'all' || inputs.chunk == 'post'))
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - name: Run live post-market window (90 min)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: dotnet run --project 0dtes-agent.csproj -c Release -- --run-window-minutes 90
+      - name: Persist alert dataset
+        run: bash .github/scripts/persist-alerts.sh
+
+  # ---------------------------------------------------------------------------
+  # Daily regime seed and post-close labeling (kept from the previous config).
+  # ---------------------------------------------------------------------------
   regime:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && contains(github.event.schedule, '20 12 * * 1-5'))
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "9.0.x"
-
       - name: Seed regime history
         run: dotnet run --project 0dtes-agent.csproj -c Release -- --regime
-
       - name: Persist regime dataset
-        run: |
-          if [ -f data/regime.jsonl ]; then
-            git add data/regime.jsonl
-            if ! git diff --cached --quiet; then
-              git config user.name "0dtes-agent[bot]"
-              git config user.email "0dtes-agent[bot]@users.noreply.github.com"
-              git commit -m "dataset: refresh regime history ($(wc -l < data/regime.jsonl) day(s))"
-              git push
-            else
-              echo "no regime changes to commit"
-            fi
-          else
-            echo "regime seed produced no output"
-          fi
-
-  scan:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Skip weekends
-        run: |
-          dow=$(date -u +%u)
-          if [ "$dow" -gt 5 ]; then
-            echo "Weekend ($(date -u +%A)), skipping scan."
-            exit 0
-          fi
-
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "9.0.x"
-
-      - name: Scan once
-        env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: dotnet run --project 0dtes-agent.csproj -c Release -- --scan-once
-
-      - name: Persist alert dataset
-        run: |
-          if [ -f data/alerts.jsonl ]; then
-            git add data/alerts.jsonl
-            if ! git diff --cached --quiet; then
-              git config user.name "0dtes-agent[bot]"
-              git config user.email "0dtes-agent[bot]@users.noreply.github.com"
-              git commit -m "dataset: record $(wc -l < data/alerts.jsonl) alert(s)"
-              git push
-            else
-              echo "no alert changes to commit"
-            fi
-          else
-            echo "no alerts produced this run (market closed or no signals)"
-          fi
+        run: bash .github/scripts/persist-regime.sh
 
   label:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    # Runs on the weekday only (the labelled cron fires Mon-Fri), or on a manual dispatch.
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && endsWith(github.event.schedule, '* 1-5'))
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && contains(github.event.schedule, '40 21 * * 1-5'))
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "9.0.x"
-
       - name: Label completed alerts
         run: dotnet run --project 0dtes-agent.csproj -c Release -- --label
-
       - name: Persist labeled dataset
-        run: |
-            if [ -f data/labels.jsonl ]; then
-              git add data/labels.jsonl
-              if ! git diff --cached --quiet; then
-                git config user.name "0dtes-agent[bot]"
-                git config user.email "0dtes-agent[bot]@users.noreply.github.com"
-                git commit -m "dataset: label $(wc -l < data/labels.jsonl) alert(s)"
-                git push
-              else
-                echo "no label changes to commit"
-              fi
-            else
-              echo "no labels produced this run"
-            fi
+        run: bash .github/scripts/persist-labels.sh

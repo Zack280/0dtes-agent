@@ -23,27 +23,38 @@ public sealed class AlertService
         _regime = new RegimeStore(config.DataDir).LoadLatest()?.Regime;
     }
 
-    public async Task RunAsync(CancellationToken ct)
+    public async Task RunAsync(CancellationToken ct, TimeSpan? window = null)
     {
         var (chain, quotes) = BuildDataSources();
         await quotes.ConnectAsync(_config.Symbols, ct);
 
         var engines = new Dictionary<string, ScannerEngine>(StringComparer.OrdinalIgnoreCase);
+        var todayKeys = LoadTodayDedupKeys();
         foreach (var symbol in _config.Symbols)
         {
-            engines[symbol] = new ScannerEngine();
+            var engine = new ScannerEngine();
+            engine.SeedEmitted(todayKeys.Where(k => StartsWithSymbol(k, symbol)));
+            engines[symbol] = engine;
         }
 
         var rules = _config.BuildScanRules();
         var interval = TimeSpan.FromSeconds(Math.Max(_config.ScanIntervalSeconds, 5));
         var briefInterval = TimeSpan.FromMinutes(Math.Max(_config.BriefIntervalMinutes, 0));
         var timer = Stopwatch.StartNew();
+        var windowStart = DateTime.UtcNow;
 
         Console.WriteLine($"0dtes agent scanning {string.Join(", ", _config.Symbols)} every {interval.TotalSeconds:0}s" +
-                          $" in {_config.Mode} mode -> ntfy topic '{_config.NtfyTopic}'");
+                          $" in {_config.Mode} mode -> ntfy topic '{_config.NtfyTopic}'" +
+                          (window is { } w ? $" for up to {w.TotalMinutes:0} min" : ""));
 
         while (!ct.IsCancellationRequested)
         {
+            if (window is { } max && DateTime.UtcNow - windowStart >= max)
+            {
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] run window elapsed; exiting cleanly.");
+                break;
+            }
+
             if (briefInterval > TimeSpan.Zero && _config.EnableBrief &&
                 DateTime.Now - _lastBrief >= briefInterval)
             {
@@ -247,6 +258,8 @@ public sealed class AlertService
             ? (double?)null
             : Math.Max(0, (contract.ExpiryUtc.Date - nowUtc.Date).TotalDays);
 
+        var dedupKey = $"{symbol.ToUpperInvariant()}|{ScannerEngine.KeyFor(signal)}";
+
         // Log every candidate signal so we can later grade its outcome.
         _log.AppendAlert(new AlertRecord(
             Guid.NewGuid().ToString("N"),
@@ -265,7 +278,8 @@ public sealed class AlertService
             DaysToExpiry: dte,
             HourOfDay: timeEt.Hour,
             DayOfWeek: (int)nowUtc.DayOfWeek,
-            Regime: _regime));
+            Regime: _regime,
+            DedupKey: dedupKey));
 
         // Quality gate: only alert when the scored recommendation clears the bar.
         if (rec is null || rec.Window.Score < _config.MinAlertScore)
@@ -368,4 +382,20 @@ public sealed class AlertService
         }
         return (null, null, null);
     }
+
+    /// <summary>
+    /// Load persistent de-dup keys for alerts logged today so continuous-window
+    /// runs do not re-emit signals already captured in an earlier overlapping
+    /// window. The stored key is symbol-scoped: "SYMBOL|RuleKind|strike|side".
+    /// </summary>
+    private IEnumerable<string> LoadTodayDedupKeys()
+    {
+        DateTime todayUtc = DateTime.UtcNow.Date;
+        return _log.LoadAlerts()
+            .Where(a => a.SignalTimeUtc.Date == todayUtc && !string.IsNullOrWhiteSpace(a.DedupKey))
+            .Select(a => a.DedupKey!);
+    }
+
+    private static bool StartsWithSymbol(string key, string symbol)
+        => key.StartsWith(symbol.ToUpperInvariant() + "|", StringComparison.Ordinal);
 }

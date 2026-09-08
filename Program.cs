@@ -75,6 +75,20 @@ Console.CancelKeyPress += (_, e) =>
     cts.Cancel();
 };
 
-await service.RunAsync(cts.Token);
+// Continuous mode with an optional bounded window (e.g. GH Actions scheduled
+// runs). --run-window-minutes <N> runs the 30s scan loop for up to N minutes,
+// then exits cleanly so the caller can persist collected data. No window means
+// run indefinitely (long-lived service).
+TimeSpan? window = null;
+for (var i = 0; i < args.Length - 1; i++)
+{
+    if (string.Equals(args[i], "--run-window-minutes", StringComparison.OrdinalIgnoreCase) &&
+        double.TryParse(args[i + 1], out var minutes) && minutes > 0)
+    {
+        window = TimeSpan.FromMinutes(Math.Min(minutes, 330)); // cap under the 6h runner limit
+    }
+}
+
+await service.RunAsync(cts.Token, window);
 Console.WriteLine("Agent stopped.");
 return 0;

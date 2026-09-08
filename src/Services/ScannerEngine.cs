@@ -11,6 +11,35 @@ public sealed class ScannerEngine
     private double? _previousSpot;
     private bool _expiryWindowActive;
 
+    /// <summary>
+    /// Pre-seed the de-dup set so that signals already logged in earlier runs
+    /// (of a continuous window mode) are not emitted again. Keys use the same
+    /// format the scanner produces internally.
+    /// </summary>
+    public void SeedEmitted(IEnumerable<string> keys)
+    {
+        foreach (var key in keys)
+        {
+            _emitted.Add(key);
+        }
+    }
+
+    /// <summary>
+    /// Rebuild the in-memory de-dup key for a signal the same way the scanner
+    /// does, so a caller can persist it and seed later runs with it.
+    /// </summary>
+    public static string KeyFor(ScanSignal signal)
+    {
+        if (signal.RuleKind == ScanRuleKind.PriceLevelCross)
+        {
+            // Level-cross keys are "PriceLevelCross|<int level>".
+            var level = (long)Math.Floor(signal.Price);
+            return $"PriceLevelCross|{level}";
+        }
+        var side = signal.Side ?? "";
+        return $"{signal.RuleKind}|{signal.Strike:0}|{side}";
+    }
+
     public IReadOnlyList<ScanSignal> Evaluate(
         IReadOnlyList<ScanRule> rules,
         IReadOnlyList<OptionChainRow> chain,
@@ -77,6 +106,7 @@ public sealed class ScannerEngine
                 $"Δ {quote.Delta:+0.00;-0.00} · {strike:0} strike · IV {quote.ImpliedVolatility:P0}",
                 quote.Mid,
                 now,
+                rule.Kind,
                 strike,
                 side,
                 quote));
@@ -117,6 +147,7 @@ public sealed class ScannerEngine
                 $"{side} {strike:0} · {quote.Volume:N0} vol · {quote.Volume / median:F1}x median",
                 quote.Mid,
                 now,
+                rule.Kind,
                 strike,
                 side,
                 quote));
@@ -156,6 +187,7 @@ public sealed class ScannerEngine
                 $"{side} {strike:0} · IV {quote.ImpliedVolatility:P0} · {quote.ImpliedVolatility / atmIv:F1}x ATM",
                 quote.Mid,
                 now,
+                rule.Kind,
                 strike,
                 side,
                 quote));
@@ -176,7 +208,8 @@ public sealed class ScannerEngine
                     "Level cross",
                     $"{symbol} crossed ${level.ToString("0.00", CultureInfo.InvariantCulture)}",
                     spot.Last,
-                    now));
+                    now,
+                    rule.Kind));
             }
         }
         _previousSpot = spot.Last;
@@ -193,7 +226,7 @@ public sealed class ScannerEngine
             _expiryWindowActive = true;
             return new[]
             {
-                new ScanSignal(symbol, "Expiry window", $"{hoursLeft:F1}h to {close:HH:mm} expiration", 0, now)
+                new ScanSignal(symbol, "Expiry window", $"{hoursLeft:F1}h to {close:HH:mm} expiration", 0, now, rule.Kind)
             };
         }
         if (!inWindow)

@@ -17,6 +17,7 @@ public record ScanSignal(
     string Reason,
     double Price,
     DateTime Time,
+    ScanRuleKind RuleKind,
     double? Strike = null,
     string? Side = null,
     OptionQuote? Quote = null);

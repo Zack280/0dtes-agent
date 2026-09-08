@@ -42,7 +42,8 @@ public sealed record AlertRecord(
     double? DaysToExpiry = null,          // calendar DTE at signal time
     int HourOfDay = 0,                    // local market hour (9..16)
     int DayOfWeek = 0,                    // 1 (Mon) .. 5 (Fri), UTC
-    string? Regime = null);               // market regime at signal time (e.g. "highVol-bull")
+    string? Regime = null,                // market regime at signal time (e.g. "highVol-bull")
+    string? DedupKey = null);             // scanner de-dup key across runs (per-symbol)
 
 public sealed record LabelRecord(
     string Id,
