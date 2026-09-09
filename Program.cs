@@ -25,7 +25,7 @@ if (args.Any(a => string.Equals(a, "--label", StringComparison.OrdinalIgnoreCase
 {
     using var yahoo = new YahooReferenceService();
     var store = new AlertLogStore(config.DataDir);
-    var labeler = new OutcomeLabeler(store, yahoo);
+    var labeler = new OutcomeLabeler(store, yahoo, new OptionCaptureStore(config.DataDir));
     var n = await labeler.LabelAsync(CancellationToken.None);
     Console.WriteLine($"Labeled {n} alert(s).");
     return 0;

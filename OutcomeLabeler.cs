@@ -1,3 +1,4 @@
+using System.IO;
 using _0dtes_app.Models;
 
 namespace _0dtes_agent;
@@ -26,17 +27,20 @@ public sealed class OutcomeLabeler
 
     private readonly AlertLogStore _store;
     private readonly YahooReferenceService _yahoo;
+    private readonly OptionCaptureStore _captures;
 
-    public OutcomeLabeler(AlertLogStore store, YahooReferenceService yahoo)
+    public OutcomeLabeler(AlertLogStore store, YahooReferenceService yahoo, OptionCaptureStore? captures = null)
     {
         _store = store;
         _yahoo = yahoo;
+        _captures = captures ?? new OptionCaptureStore(Path.GetDirectoryName(store.AlertPath) ?? "data");
     }
 
     public async Task<int> LabelAsync(CancellationToken ct = default)
     {
         var alerts = _store.LoadAlerts();
         var existing = _store.LoadLabels();
+        var tap = _captures.LoadByAlertKey();
         var now = DateTime.UtcNow;
         var labeled = 0;
 
@@ -60,8 +64,8 @@ public sealed class OutcomeLabeler
             var ret15 = price15 is { } p15 && entry > 0 ? (p15 - entry) / entry * 100 : (double?)null;
             var ret60 = price60 is { } p60 && entry > 0 ? (p60 - entry) / entry * 100 : (double?)null;
 
-            var opt15 = ProjectOptionReturn(alert, price15, Horizon15);
-            var opt60 = ProjectOptionReturn(alert, price60, Horizon60);
+            var opt15 = RealOrProjectedOptionReturn(alert, tap, 15, price15);
+            var opt60 = RealOrProjectedOptionReturn(alert, tap, 60, price60);
 
             var label = new LabelRecord(
                 alert.Id,
@@ -82,6 +86,37 @@ public sealed class OutcomeLabeler
         }
 
         return labeled;
+    }
+
+    /// <summary>
+    /// Uses the live quote captured at the horizon when available (real bid/ask
+    /// observed during the continuous window), otherwise falls back to the
+    /// greeks replay. Both buy at the recorded entry ask; the real path sells at
+    /// the captured bid, the projection sells at the replayed exit bid.
+    /// </summary>
+    private static double? RealOrProjectedOptionReturn(
+        AlertRecord alert,
+        IReadOnlyDictionary<string, OptionCapture> tape,
+        int horizonMinutes,
+        double? underlyingAt)
+    {
+        if (alert.Contract is null)
+        {
+            return null;
+        }
+
+        if (tape.TryGetValue($"{alert.Id}|{horizonMinutes}", out var capture))
+        {
+            var entryAsk = alert.Contract.EntryAsk;
+            if (entryAsk is { } ask && ask > 0 &&
+                capture.Bid is { } exitBid && exitBid >= 0)
+            {
+                return (exitBid - ask) / ask * 100;
+            }
+        }
+
+        return ProjectOptionReturn(alert, underlyingAt,
+            horizonMinutes == 15 ? Horizon15 : Horizon60);
     }
 
     private static bool? DirHit(int direction, double? returnPct)

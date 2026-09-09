@@ -6,13 +6,31 @@ namespace _0dtes_agent;
 
 public sealed class AlertService
 {
+    private record PendingCapture(
+        string AlertId,
+        int HorizonMinutes,
+        DateTime DueUtc,
+        string Symbol,
+        DateTime ExpiryUtc,
+        double Strike,
+        string Side);
+
+    private static readonly TimeSpan CaptureHorizon15 = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan CaptureHorizon60 = TimeSpan.FromMinutes(60);
+
     private readonly AgentConfig _config;
     private readonly NtfyNotifier _notifier;
     private readonly YahooReferenceService _yahoo = new();
     private readonly BriefingChannel _briefing;
     private readonly AlertLogStore _log;
+    private readonly OptionCaptureStore _captures;
     private readonly string? _regime;
+    private readonly System.Net.Http.HttpClient _http = new()
+    {
+        Timeout = TimeSpan.FromSeconds(15),
+    };
     private DateTime _lastBrief = DateTime.MinValue;
+    private readonly Dictionary<string, PendingCapture> _pendingCaptures = new(StringComparer.Ordinal);
 
     public AlertService(AgentConfig config, NtfyNotifier notifier)
     {
@@ -20,6 +38,9 @@ public sealed class AlertService
         _notifier = notifier;
         _briefing = new BriefingChannel(notifier, _yahoo);
         _log = new AlertLogStore(config.DataDir);
+        _captures = new OptionCaptureStore(config.DataDir);
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36");
         _regime = new RegimeStore(config.DataDir).LoadLatest()?.Regime;
     }
 
@@ -36,6 +57,8 @@ public sealed class AlertService
             engine.SeedEmitted(todayKeys.Where(k => StartsWithSymbol(k, symbol)));
             engines[symbol] = engine;
         }
+
+        SeedPendingCapturesFromRecentAlerts();
 
         var rules = _config.BuildScanRules();
         var interval = TimeSpan.FromSeconds(Math.Max(_config.ScanIntervalSeconds, 5));
@@ -67,6 +90,7 @@ public sealed class AlertService
                 {
                     await ScanOnceAsync(chain, quotes, engines[symbol], rules, symbol, ct);
                 }
+                await DispatchDueCapturesAsync(chain, ct);
             }
             catch (Exception ex)
             {
@@ -259,10 +283,11 @@ public sealed class AlertService
             : Math.Max(0, (contract.ExpiryUtc.Date - nowUtc.Date).TotalDays);
 
         var dedupKey = $"{symbol.ToUpperInvariant()}|{ScannerEngine.KeyFor(signal)}";
+        var alertId = Guid.NewGuid().ToString("N");
 
         // Log every candidate signal so we can later grade its outcome.
         _log.AppendAlert(new AlertRecord(
-            Guid.NewGuid().ToString("N"),
+            alertId,
             nowUtc,
             symbol,
             signal.Strategy,
@@ -280,6 +305,8 @@ public sealed class AlertService
             DayOfWeek: (int)nowUtc.DayOfWeek,
             Regime: _regime,
             DedupKey: dedupKey));
+
+        ScheduleHorizonCaptures(alertId, symbol, contract, nowUtc);
 
         // Quality gate: only alert when the scored recommendation clears the bar.
         if (rec is null || rec.Window.Score < _config.MinAlertScore)
@@ -398,4 +425,158 @@ public sealed class AlertService
 
     private static bool StartsWithSymbol(string key, string symbol)
         => key.StartsWith(symbol.ToUpperInvariant() + "|", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Registers +15m and +60m live-quote captures for an alert so the tape can
+    /// record the contract's real bid/ask at the labeling horizons. Capture is
+    /// only meaningful while the contract is still trading, so we skip anything
+    /// with a strike/side we can't re-resolve.
+    /// </summary>
+    private void ScheduleHorizonCaptures(string alertId, string symbol, ContractSnapshot? contract, DateTime signalUtc)
+    {
+        if (contract is null ||
+            contract.Strike is not { } strike ||
+            string.IsNullOrWhiteSpace(contract.Side))
+        {
+            return;
+        }
+
+        _pendingCaptures.TryAdd($"{alertId}|15", new PendingCapture(alertId, 15, signalUtc + CaptureHorizon15, symbol, contract.ExpiryUtc, strike, contract.Side!));
+        _pendingCaptures.TryAdd($"{alertId}|60", new PendingCapture(alertId, 60, signalUtc + CaptureHorizon60, symbol, contract.ExpiryUtc, strike, contract.Side!));
+    }
+
+    /// <summary>
+    /// Re-schedules horizon captures for alerts logged recently (e.g. during an
+    /// earlier overlapping window) whose +15m/+60m quote may still be pending.
+    /// This lets a +60m capture that crosses a window boundary complete in the
+    /// next continuous run. Already-captured horizons are skipped.
+    /// </summary>
+    private void SeedPendingCapturesFromRecentAlerts()
+    {
+        var captured = _captures.LoadByAlertKey();
+        var now = DateTime.UtcNow;
+        var today = now.Date;
+
+        foreach (var alert in _log.LoadAlerts())
+        {
+            if (alert.Contract is null || alert.SignalTimeUtc.Date != today)
+            {
+                continue;
+            }
+            if (now - alert.SignalTimeUtc > CaptureHorizon60)
+            {
+                continue;
+            }
+
+            var symbol = alert.Symbol;
+            var contract = alert.Contract;
+            if (contract.Strike is not { } strike || string.IsNullOrWhiteSpace(contract.Side))
+            {
+                continue;
+            }
+
+            if (!captured.ContainsKey($"{alert.Id}|15") && alert.SignalTimeUtc + CaptureHorizon15 > now)
+            {
+                _pendingCaptures[$"{alert.Id}|15"] = new PendingCapture(alert.Id, 15, alert.SignalTimeUtc + CaptureHorizon15, symbol, contract.ExpiryUtc, strike, contract.Side!);
+            }
+            if (!captured.ContainsKey($"{alert.Id}|60") && alert.SignalTimeUtc + CaptureHorizon60 > now)
+            {
+                _pendingCaptures[$"{alert.Id}|60"] = new PendingCapture(alert.Id, 60, alert.SignalTimeUtc + CaptureHorizon60, symbol, contract.ExpiryUtc, strike, contract.Side!);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Re-queries the live chain for any alert whose +15m/+60m horizon has
+    /// arrived, records the contract's real quote into data/captures.jsonl, and
+    /// drops the pending entry (whether or not a quote was found, so it doesn't
+    /// retry forever). Catches transient chain failures gracefully — a missed
+    /// capture simply falls back to greeks projection in the labeler.
+    /// </summary>
+    private async Task DispatchDueCapturesAsync(IOptionChainService chain, CancellationToken ct)
+    {
+        if (_pendingCaptures.Count == 0)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var due = _pendingCaptures
+            .Where(kv => kv.Value.DueUtc <= now)
+            .ToList();
+
+        foreach (var (key, pending) in due)
+        {
+            _pendingCaptures.Remove(key);
+            try
+            {
+                IReadOnlyList<OptionChainRow> rows;
+                try
+                {
+                    rows = await chain.GetChainAsync(pending.Symbol, pending.ExpiryUtc, ct: ct).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] capture {key}: chain fetch failed ({ex.Message}); skipping.");
+                    continue;
+                }
+
+                var row = rows.FirstOrDefault(r => Math.Abs(r.Strike - pending.Strike) < 0.005);
+                var quote = pending.Side == "C" ? row?.Call : row?.Put;
+                if (quote is null)
+                {
+                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] capture {key}: contract not in chain; skipping.");
+                    continue;
+                }
+
+                var spot = await GetLatestSpotAsync(pending.Symbol, ct);
+                _captures.Append(new OptionCapture(
+                    pending.AlertId,
+                    pending.HorizonMinutes,
+                    now,
+                    pending.Symbol,
+                    pending.ExpiryUtc,
+                    pending.Strike,
+                    pending.Side,
+                    quote.Bid,
+                    quote.Ask,
+                    quote.Mid,
+                    quote.Delta,
+                    quote.Gamma,
+                    quote.Theta,
+                    quote.Vega,
+                    quote.ImpliedVolatility,
+                    spot));
+
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] capture {pending.AlertId[..6]}: " +
+                                  $"{pending.Symbol} {pending.Strike}{pending.Side} " +
+                                  $"@+{pending.HorizonMinutes}m bid {quote.Bid:F2} ask {quote.Ask:F2}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] capture {key} failed: {ex.Message}");
+            }
+        }
+    }
+
+    private async Task<double?> GetLatestSpotAsync(string symbol, CancellationToken ct)
+    {
+        try
+        {
+            var url = string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "https://query1.finance.yahoo.com/v8/finance/chart/{0}?interval=1m&range=1d",
+                Uri.EscapeDataString(symbol));
+            var json = await _http.GetStringAsync(url, ct).ConfigureAwait(false);
+            var doc = System.Text.Json.JsonDocument.Parse(json);
+            var price = doc.RootElement
+                .GetProperty("chart").GetProperty("result")[0]
+                .GetProperty("meta").GetProperty("regularMarketPrice").GetDouble();
+            return price;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }
