@@ -88,6 +88,7 @@ public static class RecommendationScorer
 
         var window = BuyWindowEvaluator.Evaluate(spot, ctx, signal, now);
         score += window.Score * 0.25;
+        score += ContractQualityAdjustment(signal);
         rec.Window = new BuyWindow
         {
             Kind = window.Kind,
@@ -96,6 +97,39 @@ public static class RecommendationScorer
             Score = Clamp(score, 0, 100),
         };
         return true;
+    }
+
+    /// <summary>
+    /// Adds (negative) points for outright bad contracts regardless of market
+    /// context: one-sided or wide markets, and near-parity deep-ITM anchor
+    /// strikes whose volatility number is unreliable and which behave like pure
+    /// delta exposure rather than a tradeable option premium.
+    /// </summary>
+    private static double ContractQualityAdjustment(_0dtes_app.Models.ScanSignal signal)
+    {
+        var quote = signal.Quote;
+        if (quote is null)
+        {
+            return 0;
+        }
+        if (quote.Bid <= 0 || quote.Ask <= 0 || quote.Mid <= 0)
+        {
+            return -20;
+        }
+        var relativeSpread = (quote.Ask - quote.Bid) / quote.Mid;
+        if (relativeSpread > 0.5)
+        {
+            return -15;
+        }
+        if (relativeSpread > 0.25)
+        {
+            return -6;
+        }
+        if (Math.Abs(quote.Delta) > 0.90)
+        {
+            return -12;
+        }
+        return 0;
     }
 
     private static double Clamp(double value, double min, double max)
