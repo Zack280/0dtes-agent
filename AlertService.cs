@@ -18,6 +18,10 @@ public sealed class AlertService
     private static readonly TimeSpan CaptureHorizon15 = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan CaptureHorizon60 = TimeSpan.FromMinutes(60);
 
+    // Week-one labels: the 11:00 ET hour won 1/51 sent alerts (2%), worst of
+    // any hour. Suppress sends there regardless of score.
+    private static readonly int[] BlockedSendHoursEt = { 11 };
+
     private readonly AgentConfig _config;
     private readonly NtfyNotifier _notifier;
     private readonly YahooReferenceService _yahoo = new();
@@ -284,6 +288,9 @@ public sealed class AlertService
 
         var dedupKey = $"{symbol.ToUpperInvariant()}|{ScannerEngine.KeyFor(signal)}";
         var alertId = Guid.NewGuid().ToString("N");
+        var shouldSend = rec is not null &&
+                         rec.Window.Score >= _config.MinAlertScore &&
+                         !BlockedSendHoursEt.Contains(timeEt.Hour);
 
         // Log every candidate signal so we can later grade its outcome.
         _log.AppendAlert(new AlertRecord(
@@ -298,7 +305,7 @@ public sealed class AlertService
             ctx?.News.Count ?? 0,
             rec?.Window.Score ?? 0,
             rec?.Window.Kind.ToString() ?? "",
-            Sent: rec is not null && rec.Window.Score >= _config.MinAlertScore,
+            Sent: shouldSend,
             Contract: contract,
             DaysToExpiry: dte,
             HourOfDay: timeEt.Hour,
@@ -309,10 +316,12 @@ public sealed class AlertService
         ScheduleHorizonCaptures(alertId, symbol, contract, nowUtc);
 
         // Quality gate: only alert when the scored recommendation clears the bar.
-        if (rec is null || rec.Window.Score < _config.MinAlertScore)
+        if (!shouldSend)
         {
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] skip '0DTE · {symbol} · {signal.Strategy}' " +
-                              $"(score {(rec?.Window.Score ?? 0):F0} < {_config.MinAlertScore})");
+            var reason = rec is null || rec.Window.Score < _config.MinAlertScore
+                ? $"score {(rec?.Window.Score ?? 0):F0} < {_config.MinAlertScore}"
+                : $"hour {timeEt.Hour:00} ET is suppressed (week-one data: 2% win rate)";
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] skip '0DTE · {symbol} · {signal.Strategy}' ({reason})");
             return;
         }
 

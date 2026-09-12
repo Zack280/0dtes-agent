@@ -116,6 +116,13 @@ public static class RecommendationScorer
         {
             return -20;
         }
+        // Hard veto: week-one labels showed contracts with IV > 1.0 or a <$0.10
+        // ask lost badly (9% / ~23% win at +60m) and dominate the worst trades.
+        // Never let them clear the send bar no matter how favorable the setup.
+        if (quote.ImpliedVolatility > 1.0 || quote.Ask < 0.10)
+        {
+            return -100;
+        }
         var relativeSpread = (quote.Ask - quote.Bid) / quote.Mid;
         if (relativeSpread > 0.5)
         {
@@ -125,7 +132,7 @@ public static class RecommendationScorer
         {
             return -6;
         }
-        if (Math.Abs(quote.Delta) > 0.90)
+        if (Math.Abs(quote.Delta) > 0.80)
         {
             return -12;
         }

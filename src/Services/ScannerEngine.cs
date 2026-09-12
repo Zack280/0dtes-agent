@@ -168,14 +168,17 @@ public sealed class ScannerEngine
             return Array.Empty<ScanSignal>();
         }
 
-        // Only tradeable, near-money contracts: real two-sided prices, a sane
-        // delta (deep-ITM anchors get garbage IV from the feed and are pure
-        // delta exposure, not a volatility play), and an IV that is clearly
-        // elevated but still within a plausible range for a real spike.
+        // Only tradeable, near-money contracts: real two-sided prices with a
+        // sane minimum premium, a sane delta (deep-ITM anchors get garbage IV
+        // from the feed and are pure delta exposure, not a volatility play),
+        // and an IV that is clearly elevated but still within a plausible range
+        // for a real spike. Week-one data: contracts with IV > 1.0 or asks
+        // < $0.10 were the worst offenders (9% / 23% win at +60m), so those are
+        // hard-filtered regardless of score.
         var candidates = EnumerateQuotes(chain)
-            .Where(c => c.Quote.Bid > 0 && c.Quote.Ask > 0)
-            .Where(c => Math.Abs(c.Quote.Delta) is >= 0.10 and <= 0.90)
-            .Where(c => c.Quote.ImpliedVolatility > 1.5 * atmIv && c.Quote.ImpliedVolatility <= 2.0)
+            .Where(c => c.Quote.Bid > 0 && c.Quote.Ask > 0 && c.Quote.Ask >= 0.10)
+            .Where(c => Math.Abs(c.Quote.Delta) is >= 0.10 and <= 0.80)
+            .Where(c => c.Quote.ImpliedVolatility > 1.5 * atmIv && c.Quote.ImpliedVolatility <= 1.0)
             .OrderByDescending(c => c.Quote.ImpliedVolatility)
             .Take(MaxPerRulePerScan)
             .ToArray();
