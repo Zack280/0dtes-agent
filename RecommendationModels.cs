@@ -123,6 +123,13 @@ public static class RecommendationScorer
         {
             return -100;
         }
+        // Hard veto: two-week labels show OTM contracts (|delta| < 0.25) average
+        // -50% at +60m with a ~3% win rate, in both SPY 0DTE and SOFI. Never let
+        // them clear the send bar no matter how favorable the setup.
+        if (Math.Abs(quote.Delta) < 0.25)
+        {
+            return -100;
+        }
         var relativeSpread = (quote.Ask - quote.Bid) / quote.Mid;
         if (relativeSpread > 0.5)
         {

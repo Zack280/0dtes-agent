@@ -22,6 +22,11 @@ public sealed class AlertService
     // any hour. Suppress sends there regardless of score.
     private static readonly int[] BlockedSendHoursEt = { 11 };
 
+    // Two-week labels: SOFI has no 0DTE (contracts are 5-DTE and average
+    // -15% to -38% on the 15m/60m tape). Keep logging/capturing/labeling it
+    // for the dataset, but never push it to the phone.
+    private static readonly string[] SuppressedSendSymbols = { "SOFI" };
+
     private readonly AgentConfig _config;
     private readonly NtfyNotifier _notifier;
     private readonly YahooReferenceService _yahoo = new();
@@ -290,7 +295,8 @@ public sealed class AlertService
         var alertId = Guid.NewGuid().ToString("N");
         var shouldSend = rec is not null &&
                          rec.Window.Score >= _config.MinAlertScore &&
-                         !BlockedSendHoursEt.Contains(timeEt.Hour);
+                         !BlockedSendHoursEt.Contains(timeEt.Hour) &&
+                         !SuppressedSendSymbols.Contains(symbol);
 
         // Log every candidate signal so we can later grade its outcome.
         _log.AppendAlert(new AlertRecord(
@@ -320,7 +326,9 @@ public sealed class AlertService
         {
             var reason = rec is null || rec.Window.Score < _config.MinAlertScore
                 ? $"score {(rec?.Window.Score ?? 0):F0} < {_config.MinAlertScore}"
-                : $"hour {timeEt.Hour:00} ET is suppressed (week-one data: 2% win rate)";
+                : SuppressedSendSymbols.Contains(symbol)
+                    ? $"symbol {symbol} is suppressed (no 0DTE; two-week data shows heavy bleed)"
+                    : $"hour {timeEt.Hour:00} ET is suppressed (week-one data: 2% win rate)";
             Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] skip '0DTE · {symbol} · {signal.Strategy}' ({reason})");
             return;
         }
