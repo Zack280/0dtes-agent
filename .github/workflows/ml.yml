@@ -1,0 +1,40 @@
+name: ml-baseline
+
+on:
+  schedule:
+    # Weekly after the Friday close+label run: 22:30 UTC Saturday so the last
+    # trading week's labels are finished and live in the repo.
+    - cron: "30 22 * * 6"
+  workflow_dispatch:
+
+concurrency:
+  group: ml-baseline
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install ML dependencies
+        run: python -m pip install -r ml/requirements.txt
+      - name: Rebuild feature table
+        run: python ml/export.py
+      - name: Run walk-forward baseline
+        run: python ml/baseline.py
+      - name: Commit feature table + trend
+        run: |
+          git config user.name "0dtes-agent[bot]"
+          git config user.email "0dtes-agent[bot]@users.noreply.github.com"
+          git add ml/features.csv ml/results.csv
+          git commit -m "ml baseline: refresh features and walk-forward trend" || true
+          git fetch origin master
+          git pull --rebase origin master
+          git push

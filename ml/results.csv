@@ -1,0 +1,2 @@
+runUtc,rows,days,auroc60,ret60_sendall,ret60_gate,ret60_logreg,ret60_gbm
+2026-09-19T20:30:57.810967+00:00,689,7,0.641,-8.15,-8.78,-3.96,-4.99
